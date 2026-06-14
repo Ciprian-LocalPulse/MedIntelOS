@@ -1,9 +1,0 @@
-.git
-.github
-.venv
-__pycache__
-*.pyc
-node_modules
-artifacts
-cache
-outputs
