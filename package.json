@@ -11,7 +11,7 @@
   "devDependencies": {
     "@nomicfoundation/hardhat-viem": "^3.0.9",
     "hardhat": "^3.9.0",
-    "typescript": "^5.9.0",
+    "typescript": "^6.0.3",
     "viem": "^2.52.2"
   }
 }
