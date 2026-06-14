@@ -1,0 +1,20 @@
+{
+  "hook": "patient-view",
+  "context": {
+    "patient_id": "synthetic-patient-1",
+    "age": 70,
+    "sex": "M",
+    "location": "ED",
+    "vitals": {
+      "heart_rate": 115,
+      "systolic_bp": 88,
+      "diastolic_bp": 54,
+      "respiratory_rate": 26,
+      "temperature": 39.1,
+      "spo2": 91,
+      "gcs": 13
+    },
+    "labs": [],
+    "medications": []
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "resourceType": "Patient",
+  "id": "synthetic-patient-1",
+  "active": true,
+  "name": [
+    {
+      "use": "official",
+      "family": "Example",
+      "given": ["Alex"]
+    }
+  ],
+  "gender": "unknown",
+  "birthDate": "1970-01-01"
+}
