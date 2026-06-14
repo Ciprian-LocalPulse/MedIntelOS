@@ -1,9 +1,13 @@
-import assert from "node:assert/strict";
+﻿import assert from "node:assert/strict";
 
 import { network } from "hardhat";
 import { keccak256, toBytes, zeroAddress, zeroHash } from "viem";
 
 const patientReferenceHash = keccak256(toBytes("synthetic-patient-1"));
+
+function normalizeAddress(address: `0x${string}`) {
+  return address.toLowerCase();
+}
 
 async function deployFixture() {
   const { viem } = await network.connect();
@@ -51,7 +55,7 @@ async function testPatientGrantAndRevoke() {
     const consentIds = await manager.read.getPatientConsents([patient.account.address]);
     assert.equal(consentIds.length, 1);
     const consent = await manager.read.getConsent([consentIds[0]]);
-    assert.equal(consent.patient, patient.account.address);
+    assert.equal(normalizeAddress(consent.patient), normalizeAddress(patient.account.address));
 
     await wait(
       await manager.write.revokeConsent([consentIds[0], "Patient request"], {
@@ -95,3 +99,4 @@ async function testProxyAuthorization() {
 await testPatientGrantAndRevoke();
 await testProxyAuthorization();
 console.log("Contract integration tests passed.");
+
