@@ -13,7 +13,12 @@ The repository is intentionally honest about its maturity: it is an **alpha,
 educational system**, not a production EHR, not a complete FHIR implementation,
 not a medical device, and not evidence of regulatory compliance.
 
-![Conceptual MedIntelOS stack visualization](assets/medintelos-stack-visualization.png)
+
+
+<div align="center">
+  <img src="assets/medintelos-stack-visualization.png" alt="MedIntelOS Stack Visualization" width="100%">
+</div>
+
 
 > **Concept illustration:** The labels and interfaces shown above communicate the
 > long-term product vision. They do not represent implemented functionality,
@@ -209,6 +214,53 @@ Primary references:
 Read [CONTRIBUTING.md](CONTRIBUTING.md). Clinical behavior changes require a
 published source, explicit assumptions, boundary tests, and a reviewer who can
 assess the clinical and human-factors impact.
+## 💖 Support & Donations
+
+MedIntelOS is free and open-source forever. If this project helps your hospital, clinic, or research institution, please consider supporting continued development:
+
+### 💳 PayPal
+**[paypal.me/agentflowenterprise](https://paypal.me/agentflowenterprise)**
+
+### 🏦 Bank Transfer (EUR / SEPA)
+| Field | Value |
+|---|---|
+| Name | Ciprian Stefan Plesca |
+| IBAN | BE83 9679 1975 8915 |
+| BIC/SWIFT | TRWIBEB1XXX |
+| Bank | Wise, Rue du Trône 100, Brussels, Belgium |
+
+### 🏦 Bank Transfer (GBP)
+| Field | Value |
+|---|---|
+| Name | Ciprian Stefan Plesca |
+| Account Number | 92055372 |
+| Sort Code | 23-14-70 |
+| IBAN | GB68 TRWI 2314 7092 0553 72 |
+| BIC/SWIFT | TRWIGB2LXXX |
+
+### 🏦 Bank Transfer (USD)
+| Field | Value |
+|---|---|
+| Name | Ciprian Stefan Plesca |
+| Account Type | Checking |
+| Routing Number | 026073150 |
+| Account Number | 8314225367 |
+| BIC/SWIFT | CMFGUS33 |
+| Bank | Community Federal Savings Bank, 89-16 Jamaica Ave, Woodhaven, NY 11421, USA |
+
+### ₿ Cryptocurrency
+| Currency | Address |
+|---|---|
+| **Bitcoin (BTC)** | `bc1qf3yy0w8z37rwavxpu38wem3yffpanw7wzj32qj` |
+| **Ethereum (ETH)** | `0x27d9a6a5b8507e6031bb044319410da96222d402` |
+
+Every contribution — no matter how small — directly funds:
+- New AI model development and clinical validation
+- Security audits and penetration testing
+- Documentation and clinical training materials
+- Hospital pilot deployments in underserved regions
+
+---
 
 ## License
 
