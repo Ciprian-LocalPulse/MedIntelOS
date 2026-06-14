@@ -1,5 +1,10 @@
 # 🏥 MedIntelOS — Medical Intelligence Operating System
 
+<div align="center">
+  <img src="assets/medintelos-stack-visualization.png" alt="MedIntelOS Stack Visualization" width="100%">
+</div>
+
+
 > **The world's first open-source, AI-native, blockchain-secured, interoperable Medical Intelligence Operating System — built to unify clinical decision support, real-time patient monitoring, federated learning across hospitals, and zero-trust health data governance into a single, production-ready platform.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
