@@ -12,6 +12,6 @@
     "@nomicfoundation/hardhat-viem": "^3.0.9",
     "hardhat": "^3.9.0",
     "typescript": "^5.9.0",
-    "viem": "^2.52.2"
+    "viem": "^2.53.1"
   }
 }
