@@ -12,4 +12,4 @@ All notable changes will be documented here.
 - Restricted proxy consent to patient-authorized proxies in the Solidity contract.
 - Added Docker, CI, Python tests, contract tests, and technical documentation.
 - Replaced unsupported production and compliance claims with explicit boundaries.
-„First tagged release of MedIntelOS: v0.1.0-alpha."
+- First tagged release of MedIntelOS: v0.1.0-alpha.
