@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+message: "If you use MedIntelOS in academic or research work, please cite it as below."
+type: software
+title: "MedIntelOS: An Alpha-Stage Reference Implementation for Health-Data Interoperability, Clinical Decision Support, and Federated Learning"
+authors:
+  - family-names: "Plesca"
+    given-names: "Ciprian Stefan"
+    # orcid: "https://orcid.org/0009-0006-1340-0232"   # add if/when you register one — see note below
+repository-code: "https://github.com/Ciprian-LocalPulse/MedIntelOS"
+url: "https://agentflow-enterprise.com/"
+abstract: >
+  MedIntelOS is an open-source, alpha-stage reference implementation for
+  experimenting with health-data interoperability (FHIR R5), clinical
+  decision-support workflows (CDS Hooks), federated model aggregation,
+  tamper-evident audit records, and patient-consent smart contracts. It is
+  explicitly not a certified EHR, not a complete FHIR implementation, and not
+  evidence of regulatory or clinical compliance — see the repository's own
+  README and MEDICAL_DISCLAIMER.md for the current scope boundary.
+keywords:
+  - health-data-interoperability
+  - fhir
+  - cds-hooks
+  - clinical-decision-support
+  - federated-learning
+  - zero-knowledge-proofs
+license: MIT
+version: "0.x-alpha"   # update to match the actual tag/release at time of citation
+date-released: "2026-01-01"   # replace with the real date of the version being cited
