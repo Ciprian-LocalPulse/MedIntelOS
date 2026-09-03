@@ -2,7 +2,13 @@
 
 All notable changes will be documented here.
 
-## 0.1.0 - 2026-06-14
+## [0.1.0-alpha] - 2026-09-03
+
+**First tagged release of MedIntelOS: `v0.1.0-alpha`.**
+
+The changes below were implemented and merged prior to this date; the tag
+itself (commit `4e86bce`) was created on 2026-09-03 — that is the release's
+actual date of record, not the date the underlying work was completed.
 
 - Added installable Python package and FastAPI application.
 - Added FHIR R5 JSON builders and an in-memory CRUD/search reference store.
@@ -12,4 +18,4 @@ All notable changes will be documented here.
 - Restricted proxy consent to patient-authorized proxies in the Solidity contract.
 - Added Docker, CI, Python tests, contract tests, and technical documentation.
 - Replaced unsupported production and compliance claims with explicit boundaries.
-- First tagged release of MedIntelOS: v0.1.0-alpha.
+- Added `CITATION.cff` for academic citation (ORCID: 0009-0006-1340-0232).
