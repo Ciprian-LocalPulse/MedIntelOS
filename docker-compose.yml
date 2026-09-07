@@ -7,6 +7,7 @@ services:
       MEDINTELOS_ENVIRONMENT: development
       MEDINTELOS_API_KEY: ${MEDINTELOS_API_KEY:-local-development-key-change-me}
       MEDINTELOS_FHIR_BASE_URL: http://localhost:8080
+      MEDINTELOS_FHIR_BACKEND: ${MEDINTELOS_FHIR_BACKEND:-memory}
     read_only: true
     tmpfs:
       - /tmp

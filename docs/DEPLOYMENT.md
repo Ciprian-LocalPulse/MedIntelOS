@@ -16,18 +16,87 @@ read-only root filesystem, and exposes port 8080.
 | `MEDINTELOS_FHIR_BASE_URL` | URLs advertised in metadata | `http://localhost:8080` |
 | `MEDINTELOS_REQUIRE_API_KEY` | Enable API-key boundary | `true` |
 | `MEDINTELOS_MAX_RESOURCE_BYTES` | HTTP body limit | `1000000` |
+| `MEDINTELOS_FHIR_BACKEND` | `memory` or `postgres` | `memory` |
+| `MEDINTELOS_DATABASE_URL` | Postgres DSN; required when backend is `postgres` | unset |
+| `MEDINTELOS_DATABASE_POOL_MIN_SIZE` | Connection pool floor | `1` |
+| `MEDINTELOS_DATABASE_POOL_MAX_SIZE` | Connection pool ceiling | `10` |
 
 Production mode refuses the built-in API key and requires at least 24 characters.
 This length check is only a configuration guard, not a credential-management
 solution.
 
+## Persistent Storage (Postgres)
+
+The default `memory` backend loses all data on restart — fine for a quick
+evaluation, not for anything you want to keep. `postgres` persists resources
+in a single-current-version table (see `migrations/versions/0001_fhir_resources.py`);
+full FHIR version history is not yet implemented (`docs/ROADMAP.md`, 0.3.0
+boundary).
+
+### Local, without Docker
+
+```bash
+export MEDINTELOS_DATABASE_URL="postgresql://medintelos:CHANGE-ME@localhost:5432/medintelos"
+pip install -e ".[postgres]"
+alembic upgrade head          # run once, and again after every migration you add
+export MEDINTELOS_FHIR_BACKEND=postgres
+uvicorn medintelos.api.app:app --reload
+```
+
+### Docker Compose
+
+The default `docker-compose.yml` still uses the in-memory backend — nothing
+changes for existing setups. To run with Postgres instead:
+
+```bash
+cp .env.example .env
+# edit .env: set MEDINTELOS_API_KEY, POSTGRES_PASSWORD, and
+# MEDINTELOS_DATABASE_URL's password to match POSTGRES_PASSWORD
+
+docker compose -f docker-compose.yml -f docker-compose.postgres.yml up --build
+```
+
+This starts three services: `db` (Postgres, with a named volume so data
+survives `docker compose down`), `migrate` (runs `alembic upgrade head` once
+and exits — `api` waits for it to succeed before starting), and `api` (now
+pointed at `postgres` via `MEDINTELOS_FHIR_BACKEND`).
+
+### Adding a new migration
+
+```bash
+alembic revision -m "describe the change"
+# edit the generated file in migrations/versions/ by hand — this project
+# does not use --autogenerate, so the migration only contains what you
+# actually write
+alembic upgrade head          # apply and verify locally before committing
+```
+
+Always write and test both `upgrade()` and `downgrade()`.
+
+### Backup and restore
+
+The `db` service's data lives in the `medintelos-db-data` named volume. For
+anything beyond local evaluation, back up with `pg_dump`, not by copying the
+volume directly:
+
+```bash
+docker compose exec db pg_dump -U medintelos medintelos > backup.sql
+# restore into a fresh database:
+docker compose exec -T db psql -U medintelos medintelos < backup.sql
+```
+
+Schedule this, store backups off the host running the database, and test
+restores — an untested backup is not a backup.
+
 ## Production Readiness Gate
 
-Do not expose the reference container to patient data. A production program must
-replace volatile storage, add TLS and an identity provider, enforce authorization
-per resource and purpose, validate FHIR profiles and terminology, encrypt durable
-data, isolate tenants, implement backups, monitor security events, and complete
-clinical and regulatory validation.
+Do not expose the reference container to patient data. `MEDINTELOS_FHIR_BACKEND=postgres`
+replaces volatile storage, but a production program must still add TLS and an
+identity provider (`docs/ROADMAP.md` 0.4.0), enforce authorization per resource
+and purpose, validate FHIR profiles and terminology (0.5.0), encrypt durable
+data at rest, isolate tenants, automate and test backups beyond the manual
+`pg_dump` steps above, monitor security events, and complete clinical and
+regulatory validation (0.6.0).
 
 ## Contract Deployment
 
@@ -37,37 +106,3 @@ use a multisig administrator, test key loss, and review all events for privacy.
 
 The contract records erasure evidence; it cannot erase off-chain replicas or
 immutable blockchain history. Do not market that event as proof of legal erasure.
-
-### Deployment sequence (with governance)
-
-`MedIntelOSGovernance` (see [contracts/MedIntelOSGovernance.sol](../contracts/MedIntelOSGovernance.sol))
-implements the "multisig administrator" referenced above as an N-of-M
-propose/approve/execute contract with a mandatory timelock delay. It replaces
-a single EOA as `owner` on both contracts below.
-
-1. Deploy `MedIntelOSGovernance` with the initial signer set, approval
-   threshold, and timelock delay (seconds). Choose these values deliberately —
-   changing them later itself requires a governance proposal.
-2. Deploy `MedIntelOSAuditLedger` with the zero address.
-3. Deploy `MedIntelOSConsentManager` with the ledger address.
-4. Call `setConsentManager` on the ledger (from the deployer EOA — this still
-   happens before ownership handoff).
-5. Transfer administrative control: from the deployer EOA, call
-   `transferOwnership(governanceAddress)` on both `MedIntelOSAuditLedger` and
-   `MedIntelOSConsentManager`. From this point on, every `onlyOwner` function
-   on either contract can only be reached by a governance proposal that
-   clears signer threshold and the timelock delay — there is no remaining
-   single-signature path. Verify `owner()` on both contracts equals the
-   governance address before proceeding, and treat the deployer key as
-   retired for admin purposes afterward.
-6. Register and independently verify institution identities — `verifyInstitution`
-   now requires a governance proposal to reach threshold + timelock before it
-   executes, rather than a single signature.
-7. Commission the external audit in `docs/CONTRACT_AUDIT_CHECKLIST.md` — of
-   the consent/audit contracts **and** of `MedIntelOSGovernance` — before any
-   non-testnet deployment. None of the steps above substitute for that audit.
-
-Identity binding for governance signers (who they are, how their keys are
-custodied, how a lost key is replaced) is an off-chain, operator-defined
-process — see [docs/DID_VC_DESIGN.md](DID_VC_DESIGN.md) for the related,
-separate design covering patient/institution identity linkage.

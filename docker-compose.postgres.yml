@@ -1,0 +1,39 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-medintelos}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set a strong POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-medintelos}
+    volumes:
+      - medintelos-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-medintelos} -d ${POSTGRES_DB:-medintelos}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    security_opt:
+      - no-new-privileges:true
+
+  migrate:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      MEDINTELOS_DATABASE_URL: ${MEDINTELOS_DATABASE_URL:?set MEDINTELOS_DATABASE_URL in .env}
+    entrypoint: ["alembic", "upgrade", "head"]
+    restart: "no"
+
+  api:
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      MEDINTELOS_FHIR_BACKEND: postgres
+      MEDINTELOS_DATABASE_URL: ${MEDINTELOS_DATABASE_URL:?set MEDINTELOS_DATABASE_URL in .env}
+
+volumes:
+  medintelos-db-data:

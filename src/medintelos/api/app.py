@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 
 from medintelos.api.schemas import CDSHooksRequest, CDSSRequest, PatientContextRequest
 from medintelos.audit import AuditChain
@@ -19,13 +21,29 @@ from medintelos.cdss import (
 )
 from medintelos.config import Settings
 from medintelos.fhir.builders import BundleType, FHIRBundleBuilder, build_capability_statement
-from medintelos.fhir.repository import (
-    FHIRStore,
-    FHIRStoreError,
-    ResourceNotFound,
-    VersionConflict,
-)
+from medintelos.fhir.exceptions import FHIRStoreError, ResourceNotFound, VersionConflict
+from medintelos.fhir.repository import FHIRStore
+from medintelos.fhir.store_protocol import FHIRStoreProtocol
 from medintelos.security import APIKeyAuthenticator
+
+
+def _build_fhir_store(settings: Settings) -> FHIRStoreProtocol:
+    """Select the FHIR backend named by settings.fhir_backend.
+
+    The Postgres driver is only imported when actually needed, so installs
+    that never set MEDINTELOS_FHIR_BACKEND=postgres do not require the
+    `postgres` extra (see pyproject.toml's optional-dependencies).
+    """
+    if settings.fhir_backend == "postgres":
+        from medintelos.fhir.postgres_repository import PostgresFHIRStore
+
+        assert settings.database_url is not None  # enforced by Settings.validate()
+        return PostgresFHIRStore(
+            settings.database_url,
+            min_size=settings.database_pool_min_size,
+            max_size=settings.database_pool_max_size,
+        )
+    return FHIRStore()
 
 
 def operation_outcome(message: str, code: str = "processing") -> dict[str, Any]:
@@ -46,6 +64,17 @@ def _to_domain(request: PatientContextRequest) -> PatientContext:
     )
 
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    try:
+        yield
+    finally:
+        # Releases the Postgres connection pool cleanly on shutdown; a no-op
+        # for the in-memory backend. Matters for graceful restarts and for
+        # tests that create/tear down many app instances in one process.
+        app.state.fhir_store.close()
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     settings.validate()
@@ -59,9 +88,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "Not validated for patient care."
         ),
         license_info={"name": "MIT", "identifier": "MIT"},
+        lifespan=_lifespan,
     )
     app.state.settings = settings
-    app.state.fhir_store = FHIRStore()
+    app.state.fhir_store = _build_fhir_store(settings)
     app.state.audit = AuditChain()
     app.state.cdss = CDSSEngine()
     authenticate = APIKeyAuthenticator(settings)
@@ -160,7 +190,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response: Response,
         actor: str = Depends(authenticate),
     ) -> dict[str, Any]:
-        created = app.state.fhir_store.create(resource_type, resource)
+        created = await run_in_threadpool(app.state.fhir_store.create, resource_type, resource)
         location = f"/fhir/R5/{resource_type}/{created['id']}"
         response.headers["Location"] = location
         response.headers["ETag"] = f"W/\"{created['meta']['versionId']}\""
@@ -174,7 +204,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response: Response,
         actor: str = Depends(authenticate),
     ) -> dict[str, Any]:
-        resource = app.state.fhir_store.read(resource_type, resource_id)
+        resource = await run_in_threadpool(app.state.fhir_store.read, resource_type, resource_id)
         response.headers["ETag"] = f"W/\"{resource['meta']['versionId']}\""
         app.state.audit.append(
             actor=actor,
@@ -195,7 +225,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             for key, value in request.query_params.items()
             if key != "_count"
         }
-        matches = app.state.fhir_store.search(resource_type, params)[:count]
+        matches = (await run_in_threadpool(app.state.fhir_store.search, resource_type, params))[
+            :count
+        ]
         app.state.audit.append(
             actor=actor,
             action="fhir.search",
@@ -221,8 +253,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> dict[str, Any]:
         if_match = request.headers.get("if-match")
         expected_version = if_match.replace('W/"', "").replace('"', "") if if_match else None
-        updated = app.state.fhir_store.update(
-            resource_type, resource_id, resource, expected_version=expected_version
+        updated = await run_in_threadpool(
+            app.state.fhir_store.update,
+            resource_type,
+            resource_id,
+            resource,
+            expected_version,
         )
         response.headers["ETag"] = f"W/\"{updated['meta']['versionId']}\""
         app.state.audit.append(
@@ -242,7 +278,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         resource_id: str,
         actor: str = Depends(authenticate),
     ) -> Response:
-        app.state.fhir_store.delete(resource_type, resource_id)
+        await run_in_threadpool(app.state.fhir_store.delete, resource_type, resource_id)
         app.state.audit.append(
             actor=actor,
             action="fhir.delete",

@@ -7,9 +7,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN groupadd --system medintelos && useradd --system --gid medintelos medintelos
 WORKDIR /app
 
-COPY pyproject.toml README.md LICENSE ./
+COPY pyproject.toml README.md LICENSE alembic.ini ./
 COPY src ./src
-RUN python -m pip install --upgrade pip && python -m pip install .
+COPY migrations ./migrations
+RUN python -m pip install --upgrade pip && python -m pip install ".[postgres]"
 
 USER medintelos
 EXPOSE 8080
