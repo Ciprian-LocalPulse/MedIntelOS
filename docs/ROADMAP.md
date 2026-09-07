@@ -25,11 +25,13 @@ Nothing here is a committed date; it is a dependency-ordered plan.
 
 ## 0.3.0 — Persistent FHIR store
 
-- [ ] Postgres-backed implementation of the `FHIRStore` interface (interface
+- [x] Postgres-backed implementation of the `FHIRStore` interface (interface
       unchanged; in-memory store remains available for tests and quick starts)
-- [ ] Alembic migrations
-- [ ] `docker-compose.yml` gains a `postgres` service
-- [ ] Backup/restore documented in `docs/DEPLOYMENT.md`
+- [x] Alembic migrations
+- [x] `docker-compose.yml` gains a `postgres` service (as an opt-in override,
+      `docker-compose.postgres.yml`, so the default memory-backend workflow
+      is unaffected)
+- [x] Backup/restore documented in `docs/DEPLOYMENT.md`
 - **Boundary:** still not a conformance-tested FHIR server; still no
   multi-tenant isolation.
 

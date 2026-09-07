@@ -1,4 +1,10 @@
-"""Thread-safe in-memory FHIR resource repository."""
+"""Thread-safe in-memory FHIR resource repository.
+
+This is one of two interchangeable backends behind the same interface (see
+`fhir/store_protocol.py`). Use it for tests and quick starts. For anything
+that must survive a process restart, use `fhir/postgres_repository.py`
+instead — see docs/DEPLOYMENT.md for how the API selects between them.
+"""
 
 from __future__ import annotations
 
@@ -9,27 +15,22 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+from medintelos.fhir.exceptions import FHIRStoreError, ResourceNotFound, VersionConflict
+
+__all__ = ["FHIRStore", "FHIRStoreError", "ResourceNotFound", "VersionConflict", "FHIR_ID"]
+
 FHIR_ID = re.compile(r"^[A-Za-z0-9\-.]{1,64}$")
 
 
-class FHIRStoreError(ValueError):
-    pass
-
-
-class ResourceNotFound(FHIRStoreError):
-    pass
-
-
-class VersionConflict(FHIRStoreError):
-    pass
-
-
 class FHIRStore:
-    """Development repository implementing a useful subset of FHIR REST semantics."""
+    """In-memory reference repository implementing a useful subset of FHIR REST semantics."""
 
     def __init__(self) -> None:
         self._resources: dict[str, dict[str, dict[str, Any]]] = {}
         self._lock = threading.RLock()
+
+    def close(self) -> None:
+        """No-op: satisfies FHIRStoreProtocol so app.py can call this unconditionally."""
 
     def create(self, resource_type: str, resource: dict[str, Any]) -> dict[str, Any]:
         self._validate(resource_type, resource)
