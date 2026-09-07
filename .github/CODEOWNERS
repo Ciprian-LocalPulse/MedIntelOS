@@ -1,0 +1,18 @@
+# Default owner for anything not matched below.
+*                               @Ciprian-LocalPulse
+
+# Clinical decision-support logic: changes here affect real scoring output.
+/src/medintelos/cdss.py        @Ciprian-LocalPulse
+
+# Authentication and request boundary.
+/src/medintelos/security.py    @Ciprian-LocalPulse
+/src/medintelos/config.py      @Ciprian-LocalPulse
+
+# Consent and audit contracts: on-chain, effectively irreversible once deployed.
+/contracts/                    @Ciprian-LocalPulse
+/contract-tests/               @Ciprian-LocalPulse
+
+# Governance and safety documentation.
+/MEDICAL_DISCLAIMER.md         @Ciprian-LocalPulse
+/SECURITY.md                   @Ciprian-LocalPulse
+/docs/THREAT_MODEL.md          @Ciprian-LocalPulse
