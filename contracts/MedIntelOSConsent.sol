@@ -221,6 +221,8 @@ contract MedIntelOSConsentManager {
 
     event AuditLedgerChanged(address indexed auditLedger);
 
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+
     // --------------------------------------------------------
     // Modifiers
     // --------------------------------------------------------
@@ -327,6 +329,18 @@ contract MedIntelOSConsentManager {
     function setAuditLedger(address auditLedger) external onlyOwner {
         auditLedgerAddress = auditLedger;
         emit AuditLedgerChanged(auditLedger);
+    }
+
+    /**
+     * @notice Hand `owner` control to another address, e.g. a
+     *         `MedIntelOSGovernance` multisig+timelock contract, per
+     *         docs/DEPLOYMENT.md. Irreversible unless the new owner grants
+     *         it back.
+     */
+    function transferOwnership(address newOwner) external onlyOwner {
+        require(newOwner != address(0), "MedIntelOS: new owner is zero address");
+        owner = newOwner;
+        emit OwnershipTransferred(msg.sender, newOwner);
     }
 
     /**
@@ -707,6 +721,8 @@ contract MedIntelOSAuditLedger is IAuditLedger {
         string eventType
     );
 
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+
     modifier onlyAuthorized() {
         require(
             authorizedLoggers[msg.sender] || msg.sender == consentManager,
@@ -741,6 +757,18 @@ contract MedIntelOSAuditLedger is IAuditLedger {
     function setAuthorizedLogger(address logger, bool authorized) external onlyOwner {
         require(logger != address(0), "AuditLedger: zero address");
         authorizedLoggers[logger] = authorized;
+    }
+
+    /**
+     * @notice Hand `owner` control to another address, e.g. a
+     *         `MedIntelOSGovernance` multisig+timelock contract, per
+     *         docs/DEPLOYMENT.md. Irreversible unless the new owner grants
+     *         it back.
+     */
+    function transferOwnership(address newOwner) external onlyOwner {
+        require(newOwner != address(0), "AuditLedger: new owner is zero address");
+        owner = newOwner;
+        emit OwnershipTransferred(msg.sender, newOwner);
     }
 
     function logConsentEvent(

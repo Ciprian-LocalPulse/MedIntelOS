@@ -6,7 +6,9 @@
   "license": "MIT",
   "scripts": {
     "compile": "hardhat compile",
-    "test": "hardhat run contract-tests/consent.ts"
+    "test": "npm run test:consent && npm run test:governance",
+    "test:consent": "hardhat run contract-tests/consent.ts",
+    "test:governance": "hardhat run contract-tests/governance.ts"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-viem": "^3.0.9",
