@@ -65,12 +65,21 @@ async function testThresholdAndTimelockGateExecution() {
 
 async function testEndToEndOwnershipTransferAndExecution() {
   // timelockDelay = 0 so the happy path doesn't require chain time travel.
-  const { signerA, signerB, governance, manager, wait } = await deployFixture(2, 0);
+  const { signerA, signerB, outsider, governance, manager, wait } = await deployFixture(2, 0);
 
   await wait(await manager.write.transferOwnership([governance.address]));
   assert.equal((await manager.read.owner()).toLowerCase(), governance.address.toLowerCase());
 
-  const institution = "0x0000000000000000000000000000000000000abc";
+  const institution = signerA.account.address;
+
+  // Inregistram mai intai institutia pentru ca apelul de verifyInstitution sa nu fie respins
+  await wait(
+    await manager.write.registerInstitution(
+      ["Governance Hospital", "https://hospital.example/fhir/R5", "US"],
+      { account: signerA.account },
+    ),
+  );
+
   const data = encodeFunctionData({
     abi: manager.abi,
     functionName: "verifyInstitution",
@@ -91,7 +100,7 @@ async function testEndToEndOwnershipTransferAndExecution() {
   // A direct call from a governance signer must still fail: verifyInstitution
   // was only ever routed through governance, not made callable by signers.
   await assert.rejects(
-    manager.write.verifyInstitution(["0x00000000000000000000000000000000000def"], {
+    manager.write.verifyInstitution([outsider.account.address], {
       account: signerA.account,
     }),
     /caller is not owner/,
@@ -103,7 +112,7 @@ async function testNonSignerCannotProposeOrApprove() {
 
   await assert.rejects(
     governance.write.propose(
-      ["0x000000000000000000000000000000000000bb", 0n, "0x"],
+      ["0x00000000000000000000000000000000000000bb", 0n, "0x"],
       { account: outsider.account },
     ),
     /caller is not a signer/,
@@ -114,7 +123,7 @@ async function testDuplicateApprovalIsIdempotent() {
   const { signerA, governance, wait } = await deployFixture(2, 60);
 
   const txId = await governance.write.propose(
-    ["0x000000000000000000000000000000000000cc", 0n, "0x"],
+    ["0x00000000000000000000000000000000000000cc", 0n, "0x"],
     { account: signerA.account },
   );
   await wait(txId);
@@ -132,7 +141,7 @@ async function testRevokeApprovalBeforeThreshold() {
   const { signerA, governance, wait } = await deployFixture(2, 60);
 
   const txId = await governance.write.propose(
-    ["0x000000000000000000000000000000000000dd", 0n, "0x"],
+    ["0x00000000000000000000000000000000000000dd", 0n, "0x"],
     { account: signerA.account },
   );
   await wait(txId);
@@ -148,7 +157,7 @@ async function testAdminFunctionsAreSelfGatedOnly() {
   // Direct calls to signer/threshold management must fail: they only work
   // via the contract calling itself through propose/approve/execute.
   await assert.rejects(
-    governance.write.addSigner(["0x000000000000000000000000000000000000ee"], {
+    governance.write.addSigner(["0x00000000000000000000000000000000000000ee"], {
       account: signerA.account,
     }),
     /must go through propose\/approve\/execute/,
@@ -163,7 +172,7 @@ async function testCancelOwnProposalBeforeThreshold() {
   const { signerA, governance, wait } = await deployFixture(2, 60);
 
   const txId = await governance.write.propose(
-    ["0x000000000000000000000000000000000000ff", 0n, "0x"],
+    ["0x00000000000000000000000000000000000000ff", 0n, "0x"],
     { account: signerA.account },
   );
   await wait(txId);
