@@ -15,9 +15,10 @@ async function deployFixture(threshold = 2, timelockDelay = 3600) {
   ]);
 
   const ledger = await viem.deployContract("MedIntelOSAuditLedger", [zeroAddress]);
-  const manager = await viem.deployContract("MedIntelOSConsentManager", [
-    ledger.address,
-    zeroAddress,
+  const manager = await viem.deployContract("MedIntelOSConsent", [
+  ledger.address,
+  zeroAddress,
+]);
   ]);
 
   const wait = async (hash: `0x${string}`) => {
