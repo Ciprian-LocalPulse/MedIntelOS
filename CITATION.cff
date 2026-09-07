@@ -5,7 +5,7 @@ title: "MedIntelOS: An Alpha-Stage Reference Implementation for Health-Data Inte
 authors:
   - family-names: "Plesca"
     given-names: "Ciprian Stefan"
-    # orcid: "https://orcid.org/0009-0006-1340-0232"   # add if/when you register one — see note below
+    orcid: "https://orcid.org/0009-0006-1340-0232"
 repository-code: "https://github.com/Ciprian-LocalPulse/MedIntelOS"
 url: "https://agentflow-enterprise.com/"
 abstract: >
@@ -24,5 +24,5 @@ keywords:
   - federated-learning
   - zero-knowledge-proofs
 license: MIT
-version: "0.x-alpha"   # update to match the actual tag/release at time of citation
-date-released: "2026-01-01"   # replace with the real date of the version being cited
+version: "0.1.0-alpha"
+date-released: "2026-09-03"
