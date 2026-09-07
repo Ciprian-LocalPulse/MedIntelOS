@@ -34,7 +34,7 @@ async function testThresholdAndTimelockGateExecution() {
   // once it is transferred `owner` (see docs/DEPLOYMENT.md). This test
   // exercises the propose/approve/timelock gate itself, independent of that
   // transfer.
-  const institution = "0x000000000000000000000000000000000000aa";
+  const institution = "0x000000000000000000000000000000000000000a";
   const data = encodeFunctionData({
     abi: manager.abi,
     functionName: "verifyInstitution",
