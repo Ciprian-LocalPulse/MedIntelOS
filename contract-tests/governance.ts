@@ -70,7 +70,7 @@ async function testEndToEndOwnershipTransferAndExecution() {
   await wait(await manager.write.transferOwnership([governance.address]));
   assert.equal((await manager.read.owner()).toLowerCase(), governance.address.toLowerCase());
 
-  const institution = "0x00000000000000000000000000000000000abc";
+  const institution = "0x0000000000000000000000000000000000000abc";
   const data = encodeFunctionData({
     abi: manager.abi,
     functionName: "verifyInstitution",
