@@ -6,6 +6,50 @@ All notable changes will be documented here.
 
 
 
+\## Unreleased (targeting 0.8.0 — Consent contract audit and governance)
+
+
+
+\- Added `contracts/MedIntelOSGovernance.sol`: an N-of-M multisig with a
+
+&#x20; mandatory timelock delay (propose / approve / execute / cancel),
+
+&#x20; intended to hold `owner` on `MedIntelOSConsentManager` and
+
+&#x20; `MedIntelOSAuditLedger` instead of a single EOA.
+
+\- Added `transferOwnership` to `MedIntelOSConsentManager` and
+
+&#x20; `MedIntelOSAuditLedger` so ownership can be handed to the new governance
+
+&#x20; contract post-deployment.
+
+\- Added `contract-tests/governance.ts` covering threshold gating, timelock
+
+&#x20; gating, duplicate-approval idempotency, approval revocation, self-gated
+
+&#x20; admin functions, proposal cancellation, and an end-to-end ownership
+
+&#x20; transfer + governance-executed `verifyInstitution` call.
+
+\- Added `docs/DID_VC_DESIGN.md`: a design-only document for linking
+
+&#x20; wallet-based patient/institution identity to a DID/Verifiable Credential,
+
+&#x20; kept entirely off-chain. Not implemented.
+
+\- Updated `docs/DEPLOYMENT.md` with a governance-aware contract deployment
+
+&#x20; sequence.
+
+\- Updated `docs/ROADMAP.md` 0.8.0 status. The external audit item for both
+
+&#x20; contracts remains open and unchecked — it requires an independent
+
+&#x20; third-party auditor and is not satisfied by this change.
+
+
+
 \## Unreleased (targeting 0.2.0 — Governance and CI hardening)
 
 

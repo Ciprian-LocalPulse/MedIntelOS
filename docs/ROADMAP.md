@@ -74,12 +74,26 @@ Nothing here is a committed date; it is a dependency-ordered plan.
 
 ## 0.8.0 — Consent contract audit and governance
 
-- [ ] External audit of `contracts/MedIntelOSConsent.sol` before any
-      non-testnet deployment
-- [ ] Multisig + timelock for administrative functions
-- [ ] Documented DID/VC design for identity-to-consent linkage, kept off-chain
+- [ ] External audit of `contracts/MedIntelOSConsent.sol` **and**
+      `contracts/MedIntelOSGovernance.sol` before any non-testnet deployment.
+      Not satisfied by code review in this repository — requires an
+      independent third-party auditor. Tracked in
+      `docs/CONTRACT_AUDIT_CHECKLIST.md`.
+- [x] Multisig + timelock for administrative functions — implemented in
+      `contracts/MedIntelOSGovernance.sol` (N-of-M propose/approve/execute
+      with a mandatory timelock delay); `transferOwnership` added to
+      `MedIntelOSConsentManager` and `MedIntelOSAuditLedger` so `owner` can be
+      handed to it. See `docs/DEPLOYMENT.md#deployment-sequence-with-governance`
+      and `contract-tests/governance.ts`. Signer custody, key-loss recovery,
+      and legal authority to act as a signer remain off-chain, operator-owned
+      processes — this is a technical control, not a governance policy on
+      its own.
+- [x] Documented DID/VC design for identity-to-consent linkage, kept
+      off-chain — see `docs/DID_VC_DESIGN.md`. Design only; not implemented.
 - **Boundary:** on-chain data remains free of PHI and direct identifiers by
-  policy, not by cryptographic guarantee.
+  policy, not by cryptographic guarantee. Governance code existing does not
+  mean it is audited or production-ready — the external audit item above is
+  still open and gates any non-testnet deployment.
 
 ## 0.9.0 — Observability and operations
 

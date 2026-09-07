@@ -1,10 +1,13 @@
 # Smart Contract Audit Checklist
 
-`contracts/MedIntelOSConsent.sol` and the associated audit ledger contract
-handle patient consent state and institution verification. Passing
-`npm test` proves the contracts behave as the test suite describes; it does
-not prove they are safe to deploy where real value, real identities, or real
-consent decisions depend on them.
+`contracts/MedIntelOSConsent.sol`, the associated audit ledger contract, and
+`contracts/MedIntelOSGovernance.sol` (the multisig + timelock intended to
+hold `owner` on both) handle patient consent state, institution verification,
+and administrative access control. Passing `npm test` proves the contracts
+behave as the test suite describes; it does not prove they are safe to
+deploy where real value, real identities, or real consent decisions depend
+on them. **`MedIntelOSGovernance.sol` has not been externally audited and is
+in scope for this checklist just like the other two contracts.**
 
 **Do not deploy these contracts to a public mainnet, and do not connect the
 API layer to a mainnet deployment, until every item below is closed.**
@@ -31,9 +34,16 @@ Testnet deployment for integration testing is fine at any time.
 - [ ] Gas griefing / denial-of-service vectors on functions with unbounded
       loops or arrays
 - [ ] Consistency between `MedIntelOSAuditLedger` and `MedIntelOSConsentManager`
-      state (the deployment sequence in `README.md` — ledger first, then
-      manager, then `setConsentManager` — is a manual step; verify it cannot
-      be left in an inconsistent state)
+      state (the deployment sequence in `docs/DEPLOYMENT.md` — ledger first,
+      then manager, then `setConsentManager`, then `transferOwnership` on
+      both to governance — is a manual, multi-step process; verify it cannot
+      be left in an inconsistent state, e.g. ownership transferred on one
+      contract but not the other)
+- [ ] `MedIntelOSGovernance` specifically: signer-set griefing (can a minority
+      of signers block execution indefinitely?), the `onlySelf` pattern for
+      signer/threshold/delay changes, approval-revocation race conditions
+      around the moment threshold is reached, and correct accounting when a
+      signer is removed while they hold outstanding approvals
 
 ## Before mainnet (or any production network)
 

@@ -13,6 +13,46 @@ The repository is intentionally honest about its maturity: it is an **alpha,
 educational system**, not a production EHR, not a complete FHIR implementation,
 not a medical device, and not evidence of regulatory compliance.
 
+## Project Stage
+
+Current release: **`v0.1.0-alpha`**, with milestone **0.2.0 (governance & CI
+hardening)** merged to `main` and milestone **0.8.0 (consent contract
+governance)** partially complete. Status pulled directly from
+[docs/ROADMAP.md](docs/ROADMAP.md) and [CHANGELOG.md](CHANGELOG.md), not
+aspirational:
+
+```mermaid
+gantt
+    title MedIntelOS maturity roadmap (docs/ROADMAP.md)
+    dateFormat  X
+    axisFormat  %s
+    section Done
+    0.1.0 Alpha (tagged)                 :done, m1, 0, 1
+    0.2.0 Governance & CI hardening      :done, m2, 1, 2
+    section In progress
+    0.8.0 Consent contract governance    :active, m8, 2, 3
+    section Not started
+    0.3.0 Persistent FHIR store          :m3, 3, 4
+    0.4.0 Production-grade auth          :m4, 4, 5
+    0.5.0 FHIR interoperability depth    :m5, 5, 6
+    0.6.0 CDSS evidence & conformance    :m6, 6, 7
+    0.7.0 Federated learning hardening   :m7, 7, 8
+    0.9.0 Observability & operations     :m9, 8, 9
+```
+
+Milestone 0.8.0 detail, since it's the one most recently worked on:
+
+| Item | Status |
+|---|---|
+| Multisig + timelock for admin functions | **Done** — `contracts/MedIntelOSGovernance.sol`, wired via `transferOwnership` on both consent/audit contracts |
+| DID/VC identity-to-consent design | **Documented, not implemented** — [docs/DID_VC_DESIGN.md](docs/DID_VC_DESIGN.md) |
+| External audit of consent + audit + governance contracts | **Not started** — requires an independent third-party auditor; see [docs/CONTRACT_AUDIT_CHECKLIST.md](docs/CONTRACT_AUDIT_CHECKLIST.md) |
+
+No milestone here claims clinical validation, regulatory clearance, or a
+completed security audit — those require processes and evidence outside what
+a repository change can produce, and `docs/VALIDATION.md` / `docs/THREAT_MODEL.md`
+say so explicitly.
+
 ![Conceptual MedIntelOS stack visualization](assets/medintelos-stack-visualization.png)
 
 > **Concept illustration:** The labels and interfaces shown above communicate the
@@ -28,7 +68,7 @@ not a medical device, and not evidence of regulatory compliance.
 | CDSS | qSOFA, NEWS2, AKI rule, CHA2DS2-VASc helper, threshold and medication examples | Educational rules only; drug knowledge base is deliberately small |
 | Federated learning | Weighted aggregation, callback-based participant updates, DP noise experiment, outlier detection | No cryptographic secure aggregation or formal privacy accountant |
 | Audit | In-memory SHA-256 hash chain | Tamper-evident in one process, not durable or independently anchored |
-| Consent | Solidity consent and audit contracts plus Hardhat tests | Identity, legal authority, erasure, governance, and key custody remain off-chain |
+| Consent | Solidity consent and audit contracts, a multisig+timelock governance contract, plus Hardhat tests | Identity, legal authority, erasure, and key custody remain off-chain; not externally audited |
 | Operations | Docker, Compose, CI, linting, tests, API docs | Production infrastructure is outside this repository |
 
 ## Architecture
@@ -49,6 +89,92 @@ flowchart LR
 See [Architecture](docs/ARCHITECTURE.md), [Threat Model](docs/THREAT_MODEL.md),
 and [Deployment Guide](docs/DEPLOYMENT.md) for the technical detail.
 
+### CDS Hooks request lifecycle
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant EHR as EHR / research client
+    participant API as FastAPI boundary
+    participant Auth as API-key authentication
+    participant CDS as CDSS rule engine
+    participant Audit as Hash-chained audit log
+
+    EHR->>API: POST /api/v1/cdss/evaluate (X-API-Key)
+    API->>Auth: Validate key
+    alt invalid key
+        Auth-->>API: 401
+        API-->>EHR: 401 Unauthorized
+    else valid key
+        Auth-->>API: OK
+        API->>CDS: Evaluate synthetic patient context
+        CDS->>CDS: qSOFA / NEWS2 / AKI / CHA2DS2-VASc rules
+        CDS-->>API: CDS Hooks cards + _medintelos rule detail
+        API->>Audit: Append hash-chained entry
+        API-->>EHR: 200 OK (cards, non-clinical-grade)
+    end
+```
+
+### FHIR resource lifecycle (in-memory reference store)
+
+```mermaid
+stateDiagram-v2
+    [*] --> Created: POST /fhir/R5/{type}
+    Created --> Active: versionId=1, ETag issued
+    Active --> Updated: PUT (If-Match required)
+    Updated --> Active: versionId+=1, new ETag
+    Active --> Deleted: DELETE
+    Updated --> Deleted: DELETE
+    Deleted --> [*]
+    Active --> [*]: process exit (in-memory, non-durable)
+    Updated --> [*]: process exit (in-memory, non-durable)
+```
+
+### Federated learning round
+
+```mermaid
+flowchart TD
+    Start([Round start]) --> Select[Coordinator selects participants]
+    Select --> Req[Request update via update_provider callback]
+    Req --> Collect{"min_participants reached?"}
+    Collect -- no --> Req
+    Collect -- yes --> Outlier[Outlier detection on updates]
+    Outlier --> DP{"DP noise enabled?"}
+    DP -- yes --> Noise[Add differential-privacy noise experiment]
+    DP -- no --> Agg
+    Noise --> Agg[Weighted aggregation by num_samples]
+    Agg --> Model[Update experimental global model]
+    Model --> More{"total_rounds remaining?"}
+    More -- yes --> Start
+    More -- no --> End([Coordinator stops])
+```
+
+### Consent governance: multisig + timelock
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant S1 as Signer A
+    participant S2 as Signer B
+    participant Gov as MedIntelOSGovernance
+    participant CM as MedIntelOSConsentManager
+
+    S1->>Gov: propose(verifyInstitution(addr))
+    Gov-->>Gov: approvals = 1 (proposer auto-approves)
+    S2->>Gov: approve(txId)
+    Gov-->>Gov: approvals = threshold reached -> executableAt = now + delay
+    Note over Gov: Timelock window — anyone can observe the pending action
+    S1->>Gov: execute(txId)  %% after delay elapses
+    Gov->>CM: verifyInstitution(addr)
+    CM-->>Gov: state updated
+    Gov-->>S1: TransactionExecuted event
+```
+
+See [docs/DID_VC_DESIGN.md](docs/DID_VC_DESIGN.md) for how off-chain identity
+(DIDs/Verifiable Credentials) is designed to link to wallet addresses without
+ever touching the chain, and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the
+full governance deployment sequence.
+
 ## Repository Layout
 
 ```text
@@ -59,10 +185,10 @@ src/medintelos/
   federated.py         Federated aggregation coordinator
   audit.py             Tamper-evident audit chain
   security.py          API authentication boundary
-contracts/             Solidity consent and audit contracts
-contract-tests/        Hardhat contract tests
+contracts/             Solidity consent, audit, and governance contracts
+contract-tests/        Hardhat contract tests (consent + governance)
 tests/                 Python unit and API tests
-docs/                  Architecture, threat model, and deployment notes
+docs/                  Architecture, threat model, deployment, DID/VC design
 examples/              Synthetic requests only
 ```
 
@@ -160,15 +286,26 @@ npm install
 npm test
 ```
 
-The deployment sequence is:
+`contracts/MedIntelOSGovernance.sol` is an N-of-M multisig with a mandatory
+timelock delay, meant to hold `owner` on both contracts below instead of a
+single key. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#deployment-sequence-with-governance)
+for the full sequence; summarized:
 
-1. Deploy `MedIntelOSAuditLedger` with the zero address.
-2. Deploy `MedIntelOSConsentManager` with the ledger address.
-3. Call `setConsentManager` on the ledger.
-4. Register and independently verify institution identities.
+1. Deploy `MedIntelOSGovernance` with the signer set, threshold, and delay.
+2. Deploy `MedIntelOSAuditLedger` with the zero address.
+3. Deploy `MedIntelOSConsentManager` with the ledger address.
+4. Call `setConsentManager` on the ledger.
+5. Call `transferOwnership(governanceAddress)` on both contracts.
+6. Register and independently verify institution identities — this now goes
+   through governance's propose/approve/execute + timelock path.
 
 Never put PHI, names, identifiers, clinical notes, or raw FHIR resources on a
 public blockchain. Even hashes can create linkage and retention risks.
+
+**None of this has been externally audited.** `npm test` runs
+`contract-tests/consent.ts` and `contract-tests/governance.ts`, which prove
+the contracts behave as those tests describe — not that they are safe for a
+non-testnet deployment. See [docs/CONTRACT_AUDIT_CHECKLIST.md](docs/CONTRACT_AUDIT_CHECKLIST.md).
 
 ## Quality Checks
 
