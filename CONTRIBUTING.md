@@ -18,6 +18,14 @@ exclusion criteria, missing-data behavior, and tests at every threshold. A rule
 implementation is not clinical validation. Do not describe it as validated,
 safe, compliant, or ready for patient care without publicly reviewable evidence.
 
+## Scope and Priority
+
+Check `docs/ROADMAP.md` before starting non-trivial work — it lists the
+current milestone and what is intentionally deferred. `docs/GOVERNANCE.md`
+covers versioning, release process, and review expectations. If your change
+doesn't fit an open roadmap item, open an issue first so scope is agreed
+before code is written.
+
 ## Pull Requests
 
 Keep changes narrow. Explain behavior, risks, test evidence, migration impact,

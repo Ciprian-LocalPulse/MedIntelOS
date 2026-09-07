@@ -1,0 +1,54 @@
+name: Feature request
+description: Propose a new capability or improvement. Clinical rule changes must follow CONTRIBUTING.md.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: >
+        Never include PHI, credentials, private keys, or confidential system
+        details. For new or changed clinical rules, a published primary source
+        is required before implementation work begins.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What gap or limitation does this address? Link to the relevant row in README's "Implemented Scope" table or docs/ROADMAP.md if applicable.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should change, at the level of API surface, data model, or contract interface?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - FHIR / interoperability
+        - CDS Hooks / CDSS
+        - Federated learning
+        - Audit
+        - Smart contracts / consent
+        - API / security
+        - Operations / CI
+        - Documentation
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Optional, but helpful for architecture decisions.
+    validations:
+      required: false
+  - type: checkboxes
+    id: clinical
+    attributes:
+      label: Clinical impact
+      options:
+        - label: This change affects a clinical rule, threshold, or scoring output and includes a primary published source
+          required: false
