@@ -1,74 +1,42 @@
-\# Changelog
+# Changelog
 
+All notable changes to this project will be documented in this file.
 
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-All notable changes will be documented here.
+## [Unreleased] - targeting 0.2.0
 
+*Governance and CI hardening*
 
+### Fixed
+- **Mypy Configuration**: Updated `python_version` from `3.11` to `3.12`. Previously, `3.11` caused `mypy` to crash immediately against current `numpy` type stubs, preventing validation checks documented in `CONTRIBUTING.md` and `docs/VALIDATION.md` from running.
 
-\## Unreleased (targeting 0.2.0 — Governance and CI hardening)
+### Added
+- **CI Workflow**: Added `mypy src/medintelos` as a required validation step in `.github/workflows/ci.yml` (previously only `ruff check .` and `pytest` were enforced).
+- **Code Ownership**: Added `.github/CODEOWNERS` for clinical, security, and smart contract paths.
+- **Templates & Documentation**:
+  - Added `.github/ISSUE_TEMPLATE/feature_request.yml`.
+  - Added `docs/ROADMAP.md` detailing dependency-ordered milestones through version `1.0.0`.
+  - Added `docs/GOVERNANCE.md` covering branch protection rules, versioning guidelines, and the release process.
+  - Added `docs/CONTRACT_AUDIT_CHECKLIST.md` gating non-testnet deployment of consent and audit smart contracts on external security audits.
 
+---
 
+## [0.1.0-alpha] - 2026-09-03
 
-\- Fixed `mypy` configuration: `python\_version = "3.11"` made mypy crash
+> **First tagged release of MedIntelOS (`v0.1.0-alpha`)**
+> *Release commit:* `4e86bce` (date of record: September 3, 2026).
 
-&#x20; immediately against current `numpy` type stubs, so the check documented in
+### Added
+- Installable Python package architecture and FastAPI core application.
+- FHIR R5 JSON builders along with an in-memory CRUD/search reference store.
+- CDS Hooks discovery mechanism, patient-view evaluation, and validated request models.
+- Testable federated update providers and resolved first-round aggregation logic.
+- Tamper-evident in-memory audit log records.
+- Docker containerization, CI pipelines, Python test suite, contract tests, and core technical documentation.
+- `CITATION.cff` file for academic citations (ORCID: `0009-0006-1340-0232`).
 
-&#x20; `CONTRIBUTING.md` and `docs/VALIDATION.md` was not actually running.
-
-&#x20; `python\_version` is now `3.12`.
-
-\- Added `mypy src/medintelos` as a required step in `.github/workflows/ci.yml`
-
-&#x20; (previously only `ruff check .` and `pytest` were enforced).
-
-\- Added `.github/CODEOWNERS` for clinical, security, and contract-adjacent
-
-&#x20; paths.
-
-\- Added `.github/ISSUE\_TEMPLATE/feature\_request.yml`.
-
-\- Added `docs/ROADMAP.md` with dependency-ordered milestones through 1.0.0.
-
-\- Added `docs/GOVERNANCE.md` (branch protection, versioning, release process).
-
-\- Added `docs/CONTRACT\_AUDIT\_CHECKLIST.md` gating any non-testnet deployment
-
-&#x20; of the consent/audit contracts on an external audit.
-
-
-
-\## \[0.1.0-alpha] - 2026-09-03
-
-
-
-\*\*First tagged release of MedIntelOS: `v0.1.0-alpha`.\*\*
-
-
-
-The changes below were implemented and merged prior to this date; the tag
-
-itself (commit `4e86bce`) was created on 2026-09-03 — that is the release's
-
-actual date of record, not the date the underlying work was completed.
-
-
-
-\- Added installable Python package and FastAPI application.
-
-\- Added FHIR R5 JSON builders and an in-memory CRUD/search reference store.
-
-\- Added CDS Hooks discovery, patient-view evaluation, and validated request models.
-
-\- Added testable federated update providers and fixed first-round aggregation.
-
-\- Added tamper-evident in-memory audit records.
-
-\- Restricted proxy consent to patient-authorized proxies in the Solidity contract.
-
-\- Added Docker, CI, Python tests, contract tests, and technical documentation.
-
-\- Replaced unsupported production and compliance claims with explicit boundaries.
-
-\- Added `CITATION.cff` for academic citation (ORCID: 0009-0006-1340-0232).
-
+### Security & Compliance
+- **Smart Contracts**: Restricted proxy consent strictly to patient-authorized proxies in the Solidity contract implementation.
+- **Compliance Scope**: Replaced unsupported production and compliance claims with explicit system boundary definitions.
