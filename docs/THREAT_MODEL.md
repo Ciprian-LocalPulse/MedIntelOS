@@ -19,7 +19,8 @@ separate trust domains. Do not infer trust from network location alone.
 
 | Threat | Reference mitigation | Required deployment work |
 |---|---|---|
-| Unauthorized API access | Constant-time API-key comparison | OIDC, scopes, MFA where appropriate, rotation, rate limits |
+| Unauthorized API access | Constant-time API-key comparison; optional OIDC bearer-token auth with SMART-style scopes (0.4.0) | MFA at the identity provider where appropriate, key/token rotation, a real IdP in front of MEDINTELOS_OAUTH_JWKS_URL |
+| Excessive/abusive request volume | Per-client token-bucket rate limiting (0.4.0), in-memory per process | Shared (multi-instance) limiter before running more than one API process; gateway-level limits as defense in depth |
 | Resource overwrite | `If-Match` version checks | Durable transactions, authorization, history, backups |
 | Sensitive logging | Audit stores action metadata only | Log review, redaction tests, SIEM access policy |
 | Malicious model update | Shape checks and basic norm outlier detection | Signatures, attestation, robust aggregation, quarantine |
@@ -27,7 +28,8 @@ separate trust domains. Do not infer trust from network location alone.
 | Smart-contract privilege abuse | Owner checks and explicit proxy authorization | Multisig, timelocks, monitoring, independent audit |
 | On-chain privacy leakage | Documentation prohibits PHI | Data classification, linkage analysis, retention design |
 | Clinical automation bias | Explicit warnings and deterministic explanations | Human-factors testing, governance, monitoring, override review |
-| Denial of service | Body-size limit and bounded API request lists | Gateway limits, queues, autoscaling, circuit breakers |
+| Denial of service | Body-size limit, bounded API request lists, per-client rate limiting | Gateway limits, queues, autoscaling, circuit breakers |
+| Audit chain forgery/loss | Hash-chained entries; Postgres backend serializes appends via advisory lock so concurrent writers can't fork the chain (0.4.0) | Independent anchoring (e.g. periodic external timestamping), WORM storage, backup of the audit database itself |
 
 ## Non-Goals
 
