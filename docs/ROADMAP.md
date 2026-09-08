@@ -37,11 +37,14 @@ Nothing here is a committed date; it is a dependency-ordered plan.
 
 ## 0.4.0 — Production-grade authentication
 
-- [ ] OAuth2/OIDC support alongside the existing API-key path (API key remains
+- [x] OAuth2/OIDC support alongside the existing API-key path (API key remains
       for local development only, gated by `environment != "production"`)
-- [ ] SMART-on-FHIR-style scopes on API routes
-- [ ] Rate limiting middleware
-- [ ] Durable audit log (Postgres-backed, building on 0.3.0)
+- [x] SMART-on-FHIR-style scopes on API routes (compartment accepted but not
+      yet distinguished — every compartment behaves the same; tightening
+      this is part of 0.5.0's SMART App Launch work)
+- [x] Rate limiting middleware (in-memory/per-process; a shared limiter is
+      needed before running multiple instances — see docs/DEPLOYMENT.md)
+- [x] Durable audit log (Postgres-backed, building on 0.3.0)
 - **Boundary:** still no tenant isolation, still no KMS-backed secrets by
   default (documented as an operator responsibility).
 

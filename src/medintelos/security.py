@@ -1,4 +1,10 @@
-"""Small authentication boundary for the reference API."""
+"""Small authentication boundary for the reference API.
+
+Superseded by `api/auth.py`'s `CombinedAuthenticator`, which app.py now uses
+(it supports OAuth2/OIDC alongside the API-key check implemented here).
+Kept for backward compatibility with anything importing this directly; the
+logic itself is unchanged and still correct.
+"""
 
 from __future__ import annotations
 

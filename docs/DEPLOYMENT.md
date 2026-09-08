@@ -20,10 +20,68 @@ read-only root filesystem, and exposes port 8080.
 | `MEDINTELOS_DATABASE_URL` | Postgres DSN; required when backend is `postgres` | unset |
 | `MEDINTELOS_DATABASE_POOL_MIN_SIZE` | Connection pool floor | `1` |
 | `MEDINTELOS_DATABASE_POOL_MAX_SIZE` | Connection pool ceiling | `10` |
+| `MEDINTELOS_AUDIT_BACKEND` | `memory` or `postgres` | `memory` |
+| `MEDINTELOS_OAUTH_ENABLED` | Enable Bearer JWT auth alongside API key | `false` |
+| `MEDINTELOS_OAUTH_ISSUER` | Expected `iss` claim; required if OAuth enabled | unset |
+| `MEDINTELOS_OAUTH_AUDIENCE` | Expected `aud` claim; required if OAuth enabled | unset |
+| `MEDINTELOS_OAUTH_JWKS_URL` | JWKS endpoint; required if OAuth enabled | unset |
+| `MEDINTELOS_OAUTH_JWKS_CACHE_SECONDS` | JWKS cache TTL | `300` |
+| `MEDINTELOS_RATE_LIMIT_ENABLED` | Enable per-client rate limiting | `true` |
+| `MEDINTELOS_RATE_LIMIT_REQUESTS_PER_MINUTE` | Sustained rate per client | `120` |
+| `MEDINTELOS_RATE_LIMIT_BURST` | Burst capacity per client | `20` |
 
 Production mode refuses the built-in API key and requires at least 24 characters.
 This length check is only a configuration guard, not a credential-management
 solution.
+
+## OAuth2/OIDC Authentication
+
+The API key remains the default and is treated as a trusted system-level
+credential with unrestricted access — nothing changes for existing
+deployments. Setting `MEDINTELOS_OAUTH_ENABLED=true` additionally accepts
+`Authorization: Bearer <jwt>`, validated against `MEDINTELOS_OAUTH_JWKS_URL`
+(RS256 only). An OAuth-authenticated caller is scope-limited per request; an
+API-key caller is not — see `api/auth.py`'s module docstring for why that
+split exists and what it does not yet cover (full SMART App Launch is
+0.5.0).
+
+### Scopes
+
+FHIR routes enforce SMART v1-style scopes from the token's `scope` claim:
+
+- `<compartment>/<resourceType>.<action>`, e.g. `patient/Observation.read`
+- `*` is accepted for the resource (`patient/*.read`) or the action
+  (`user/Patient.*`)
+- A `write` scope also satisfies a `read` check
+- The compartment (`patient`/`user`/`system`) is accepted but not yet
+  enforced distinctly — every compartment behaves the same today
+
+A request without sufficient scope gets `403`, not `401` — the token is
+valid, it just doesn't authorize this action.
+
+### Trying it against a real identity provider
+
+Any standards-compliant OIDC provider works (Keycloak, Auth0, Okta, etc.).
+Point `MEDINTELOS_OAUTH_JWKS_URL` at its JWKS endpoint (commonly
+`<issuer>/.well-known/jwks.json` or `<issuer>/protocol/openid-connect/certs`
+for Keycloak), and set `MEDINTELOS_OAUTH_ISSUER` / `MEDINTELOS_OAUTH_AUDIENCE`
+to match how that provider issues tokens. `tests/test_oauth.py` and
+`tests/test_api_oauth.py` show the exact claim shape expected, using a
+locally generated key instead of a real provider.
+
+## Rate Limiting
+
+Enabled by default. An in-memory token-bucket limiter keys on the presented
+credential (API key or bearer token value) when present, falling back to
+client IP otherwise. `/health` is never limited. Exceeding the limit returns
+`429` with a `Retry-After` header.
+
+**Boundary:** the limiter's state lives in one process. Running multiple API
+instances behind a load balancer means each instance enforces the configured
+limit independently — the effective ceiling across the fleet is
+`instances × MEDINTELOS_RATE_LIMIT_REQUESTS_PER_MINUTE`, not a global cap. A
+shared limiter (Redis-backed token bucket, or similar) is required before
+that matters; not yet implemented.
 
 ## Persistent Storage (Postgres)
 
@@ -91,12 +149,13 @@ restores — an untested backup is not a backup.
 ## Production Readiness Gate
 
 Do not expose the reference container to patient data. `MEDINTELOS_FHIR_BACKEND=postgres`
-replaces volatile storage, but a production program must still add TLS and an
-identity provider (`docs/ROADMAP.md` 0.4.0), enforce authorization per resource
-and purpose, validate FHIR profiles and terminology (0.5.0), encrypt durable
-data at rest, isolate tenants, automate and test backups beyond the manual
-`pg_dump` steps above, monitor security events, and complete clinical and
-regulatory validation (0.6.0).
+replaces volatile storage, and `MEDINTELOS_OAUTH_ENABLED=true` plus rate
+limiting cover authentication and abuse throttling for a single instance —
+but a production program must still add TLS termination, validate FHIR
+profiles and terminology (0.5.0), encrypt durable data at rest, isolate
+tenants, automate and test backups beyond the manual `pg_dump` steps above,
+add a shared (multi-instance) rate limiter, monitor security events, and
+complete clinical and regulatory validation (0.6.0).
 
 ## Contract Deployment
 

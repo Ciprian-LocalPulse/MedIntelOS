@@ -10,8 +10,10 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, s
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
+from medintelos.api.auth import AuthContext, CombinedAuthenticator, require_fhir_scope
 from medintelos.api.schemas import CDSHooksRequest, CDSSRequest, PatientContextRequest
 from medintelos.audit import AuditChain
+from medintelos.audit_protocol import AuditChainProtocol
 from medintelos.cdss import (
     CDSHookType,
     CDSSEngine,
@@ -24,7 +26,7 @@ from medintelos.fhir.builders import BundleType, FHIRBundleBuilder, build_capabi
 from medintelos.fhir.exceptions import FHIRStoreError, ResourceNotFound, VersionConflict
 from medintelos.fhir.repository import FHIRStore
 from medintelos.fhir.store_protocol import FHIRStoreProtocol
-from medintelos.security import APIKeyAuthenticator
+from medintelos.rate_limit import TokenBucketLimiter
 
 
 def _build_fhir_store(settings: Settings) -> FHIRStoreProtocol:
@@ -44,6 +46,21 @@ def _build_fhir_store(settings: Settings) -> FHIRStoreProtocol:
             max_size=settings.database_pool_max_size,
         )
     return FHIRStore()
+
+
+def _build_audit_chain(settings: Settings) -> AuditChainProtocol:
+    """Select the audit backend named by settings.audit_backend.
+
+    Independent from fhir_backend: an operator can persist FHIR resources
+    while keeping audit in memory, or vice versa, though in practice most
+    deployments will set both to "postgres" together.
+    """
+    if settings.audit_backend == "postgres":
+        from medintelos.postgres_audit import PostgresAuditChain
+
+        assert settings.database_url is not None  # enforced by Settings.validate()
+        return PostgresAuditChain(settings.database_url)
+    return AuditChain()
 
 
 def operation_outcome(message: str, code: str = "processing") -> dict[str, Any]:
@@ -69,13 +86,22 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
-        # Releases the Postgres connection pool cleanly on shutdown; a no-op
-        # for the in-memory backend. Matters for graceful restarts and for
-        # tests that create/tear down many app instances in one process.
+        # Releases pooled connections cleanly on shutdown; a no-op for the
+        # in-memory backends. Matters for graceful restarts and for tests
+        # that create/tear down many app instances in one process.
         app.state.fhir_store.close()
+        app.state.audit.close()
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    *,
+    oauth_jwks_fetcher: Callable[[], dict[str, Any]] | None = None,
+) -> FastAPI:
+    """`oauth_jwks_fetcher` overrides how the OIDC authenticator fetches its
+    JWKS document; used by tests/test_api_oauth.py to exercise the full
+    OAuth flow through TestClient against a locally generated key instead of
+    a real identity provider. Production callers should never need this."""
     settings = settings or Settings.from_env()
     settings.validate()
 
@@ -92,9 +118,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings
     app.state.fhir_store = _build_fhir_store(settings)
-    app.state.audit = AuditChain()
+    app.state.audit = _build_audit_chain(settings)
     app.state.cdss = CDSSEngine()
-    authenticate = APIKeyAuthenticator(settings)
+
+    oidc = None
+    if settings.oauth_enabled:
+        from medintelos.oauth import OIDCAuthenticator
+
+        oidc = OIDCAuthenticator(settings, jwks_fetcher=oauth_jwks_fetcher)
+    authenticate = CombinedAuthenticator(settings, oidc)
+    require_read = require_fhir_scope(authenticate, "read")
+    require_write = require_fhir_scope(authenticate, "write")
+
+    limiter = TokenBucketLimiter(
+        requests_per_minute=settings.rate_limit_requests_per_minute,
+        burst=settings.rate_limit_burst,
+    )
 
     @app.middleware("http")
     async def reject_oversized_requests(
@@ -107,6 +146,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                 content=operation_outcome("Request body exceeds configured limit", "too-costly"),
             )
+
+        if settings.rate_limit_enabled and request.url.path != "/health":
+            # Deliberately not decoding/validating credentials here — this
+            # middleware runs ahead of route dependency injection, so it
+            # only needs a stable bucketing key, not authentication. Actual
+            # auth still happens in CombinedAuthenticator per route.
+            credential = request.headers.get("x-api-key") or request.headers.get("authorization")
+            client_host = request.client.host if request.client else "unknown"
+            bucket_key = credential or f"ip:{client_host}"
+            allowed, retry_after = limiter.allow(bucket_key)
+            if not allowed:
+                return JSONResponse(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    content=operation_outcome("Rate limit exceeded", "throttled"),
+                    headers={"Retry-After": str(max(1, int(retry_after) + 1))},
+                )
+
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
@@ -147,11 +203,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/api/v1/cdss/evaluate", tags=["Clinical decision support"])
     async def evaluate_cdss(
         payload: CDSSRequest,
-        actor: str = Depends(authenticate),
+        auth: AuthContext = Depends(authenticate),
     ) -> dict[str, Any]:
         result = app.state.cdss.evaluate(_to_domain(payload.context), CDSHookType(payload.hook))
         app.state.audit.append(
-            actor=actor,
+            actor=auth.actor,
             action="cdss.evaluate",
             resource=f"Patient/{payload.context.patient_id}",
             metadata={"hook": payload.hook, "card_count": len(result["cards"])},
@@ -161,7 +217,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/cds-services/medintelos-patient-view", tags=["CDS Hooks"])
     async def cds_hook(
         payload: CDSHooksRequest,
-        actor: str = Depends(authenticate),
+        auth: AuthContext = Depends(authenticate),
     ) -> dict[str, Any]:
         context_data = payload.prefetch.get("medintelosContext")
         if not isinstance(context_data, dict):
@@ -172,7 +228,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         context = PatientContextRequest.model_validate(context_data)
         result = app.state.cdss.evaluate(_to_domain(context), CDSHookType.PATIENT_VIEW)
         app.state.audit.append(
-            actor=actor,
+            actor=auth.actor,
             action="cds-hooks.patient-view",
             resource=f"Patient/{context.patient_id}",
             metadata={"hook_instance": payload.hookInstance, "card_count": len(result["cards"])},
@@ -188,13 +244,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         resource_type: str,
         resource: dict[str, Any],
         response: Response,
-        actor: str = Depends(authenticate),
+        auth: AuthContext = Depends(require_write),
     ) -> dict[str, Any]:
         created = await run_in_threadpool(app.state.fhir_store.create, resource_type, resource)
         location = f"/fhir/R5/{resource_type}/{created['id']}"
         response.headers["Location"] = location
         response.headers["ETag"] = f"W/\"{created['meta']['versionId']}\""
-        app.state.audit.append(actor=actor, action="fhir.create", resource=location)
+        app.state.audit.append(actor=auth.actor, action="fhir.create", resource=location)
         return created
 
     @app.get("/fhir/R5/{resource_type}/{resource_id}", tags=["FHIR R5"])
@@ -202,12 +258,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         resource_type: str,
         resource_id: str,
         response: Response,
-        actor: str = Depends(authenticate),
+        auth: AuthContext = Depends(require_read),
     ) -> dict[str, Any]:
         resource = await run_in_threadpool(app.state.fhir_store.read, resource_type, resource_id)
         response.headers["ETag"] = f"W/\"{resource['meta']['versionId']}\""
         app.state.audit.append(
-            actor=actor,
+            actor=auth.actor,
             action="fhir.read",
             resource=f"{resource_type}/{resource_id}",
         )
@@ -218,7 +274,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request,
         resource_type: str,
         count: int = Query(default=50, alias="_count", ge=1, le=200),
-        actor: str = Depends(authenticate),
+        auth: AuthContext = Depends(require_read),
     ) -> dict[str, Any]:
         params = {
             key: value
@@ -229,7 +285,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             :count
         ]
         app.state.audit.append(
-            actor=actor,
+            actor=auth.actor,
             action="fhir.search",
             resource=resource_type,
             metadata={"result_count": len(matches), "parameter_names": sorted(params)},
@@ -249,7 +305,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         resource: dict[str, Any],
         response: Response,
         request: Request,
-        actor: str = Depends(authenticate),
+        auth: AuthContext = Depends(require_write),
     ) -> dict[str, Any]:
         if_match = request.headers.get("if-match")
         expected_version = if_match.replace('W/"', "").replace('"', "") if if_match else None
@@ -262,7 +318,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         response.headers["ETag"] = f"W/\"{updated['meta']['versionId']}\""
         app.state.audit.append(
-            actor=actor,
+            actor=auth.actor,
             action="fhir.update",
             resource=f"{resource_type}/{resource_id}",
         )
@@ -276,20 +332,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def delete_resource(
         resource_type: str,
         resource_id: str,
-        actor: str = Depends(authenticate),
+        auth: AuthContext = Depends(require_write),
     ) -> Response:
         await run_in_threadpool(app.state.fhir_store.delete, resource_type, resource_id)
         app.state.audit.append(
-            actor=actor,
+            actor=auth.actor,
             action="fhir.delete",
             resource=f"{resource_type}/{resource_id}",
         )
         return Response(status_code=204)
 
     @app.get("/api/v1/audit", tags=["Audit"])
-    async def audit_entries(actor: str = Depends(authenticate)) -> dict[str, Any]:
+    async def audit_entries(auth: AuthContext = Depends(authenticate)) -> dict[str, Any]:
         entries = app.state.audit.list_entries()
-        return {"chain_valid": app.state.audit.verify(), "entries": entries, "requested_by": actor}
+        return {
+            "chain_valid": app.state.audit.verify(),
+            "entries": entries,
+            "requested_by": auth.actor,
+        }
 
     return app
 

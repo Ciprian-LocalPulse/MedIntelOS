@@ -2,6 +2,25 @@
 
 All notable changes will be documented here.
 
+## Unreleased (targeting 0.4.0 — Production-grade authentication)
+
+- Added OAuth2/OIDC bearer-token authentication (`oauth.py`,
+  `api/auth.py`'s `CombinedAuthenticator`), alongside the existing API-key
+  path. Disabled by default (`MEDINTELOS_OAUTH_ENABLED=false`).
+- Added SMART v1-style scope enforcement on FHIR routes
+  (`require_fhir_scope`, `scope_permits`). API-key clients remain full-access
+  (system-level), matching prior behavior; OAuth clients are scope-limited.
+- Added in-memory token-bucket rate limiting (`rate_limit.py`), enabled by
+  default, with a `Retry-After` header on `429`. `/health` is exempt.
+- Added `PostgresAuditChain`, a durable, hash-chain-compatible audit backend
+  selected via `MEDINTELOS_AUDIT_BACKEND=postgres`, serialized across
+  processes with a Postgres advisory lock. Extracted the hashing logic
+  (`compute_entry_hash`) so both audit backends produce identical hashes for
+  identical inputs.
+- Added migration `0002_audit_entries.py`.
+- Marked `security.py`'s `APIKeyAuthenticator` as superseded by
+  `CombinedAuthenticator` (kept for backward compatibility; logic unchanged).
+
 ## Unreleased (targeting 0.3.0 — Persistent FHIR store)
 
 - Added `PostgresFHIRStore`, a drop-in Postgres-backed implementation of the
