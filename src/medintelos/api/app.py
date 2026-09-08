@@ -63,25 +63,6 @@ def _build_audit_chain(settings: Settings) -> AuditChainProtocol:
     return AuditChain()
 
 
-def _build_fhir_store(settings: Settings) -> FHIRStoreProtocol:
-    """Select the FHIR backend named by settings.fhir_backend.
-
-    The Postgres driver is only imported when actually needed, so installs
-    that never set MEDINTELOS_FHIR_BACKEND=postgres do not require the
-    `postgres` extra (see pyproject.toml's optional-dependencies).
-    """
-    if settings.fhir_backend == "postgres":
-        from medintelos.fhir.postgres_repository import PostgresFHIRStore
-
-        assert settings.database_url is not None  # enforced by Settings.validate()
-        return PostgresFHIRStore(
-            settings.database_url,
-            min_size=settings.database_pool_min_size,
-            max_size=settings.database_pool_max_size,
-        )
-    return FHIRStore()
-
-
 def operation_outcome(message: str, code: str = "processing") -> dict[str, Any]:
     return {
         "resourceType": "OperationOutcome",
