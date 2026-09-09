@@ -2,6 +2,32 @@
 
 All notable changes will be documented here.
 
+## Unreleased (targeting 0.5.0 — FHIR interoperability depth)
+
+- **Plan revision, documented before implementation:** researched current
+  publication status of US Core and IPS — neither has a FHIR R5 release
+  (both are R4-based) — so profile validation was implemented as
+  MedIntelOS's own honestly-scoped required-element checks against the FHIR
+  R5 base spec, not a US Core/IPS conformance claim. See
+  `fhir/validation.py`'s module docstring.
+- Added the `$validate` operation (`POST /fhir/R5/{resourceType}/$validate`)
+  returning an `OperationOutcome`; does not persist the resource.
+- Added `fhir/terminology.py`: a small local LOINC table for vital signs,
+  checked (as warnings, not errors) by `$validate`.
+- Added `/fhir/R5/.well-known/smart-configuration` and the `oauth-uris`
+  CapabilityStatement extension (SMART App Launch discovery, resource-server
+  side only).
+- Added `fhirUser` and launch-context `patient` claim propagation from
+  OAuth tokens into `AuthContext`.
+- Added patient-compartment enforcement (`patient_compartment_permits`) on
+  FHIR read and search when a token carries a launch-context patient.
+  Documented boundary: not yet enforced on create/update/delete.
+- Added Bulk Data `$export` (system- and type-level kick-off, status
+  polling, NDJSON download, cancellation) modeled on HL7's Bulk Data Access
+  pattern. Runs synchronously in-process — see `fhir/bulk_export.py`'s
+  documented non-durable, single-process boundary. System-level export is
+  restricted to full-access (API-key) callers.
+
 ## Unreleased (targeting 0.4.0 — Production-grade authentication)
 
 - Added OAuth2/OIDC bearer-token authentication (`oauth.py`,

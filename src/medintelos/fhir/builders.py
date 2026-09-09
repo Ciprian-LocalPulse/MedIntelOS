@@ -667,12 +667,51 @@ class FHIRSearchParser:
 # Capability Statement (Server Advertisement)
 # ---------------------------------------------------------------------------
 
-def build_capability_statement(base_url: str) -> Dict[str, Any]:
+def build_capability_statement(
+    base_url: str,
+    *,
+    oauth_enabled: bool = False,
+    authorization_endpoint: Optional[str] = None,
+    token_endpoint: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Build a complete FHIR R5 CapabilityStatement advertising server capabilities.
     This is returned at GET /fhir/R5/metadata.
+
+    When `oauth_enabled` is True, advertises the SMART App Launch
+    `oauth-uris` extension (http://fhir-registry.smarthealthit.org/StructureDefinition/oauth-uris)
+    on `rest.security` — the mechanism SMART clients use to discover a
+    server's authorization/token endpoints from the CapabilityStatement
+    itself, predating the newer `.well-known/smart-configuration` document
+    (also implemented — see api/app.py). Only includes the endpoint
+    sub-extensions actually configured; MedIntelOS is a resource server and
+    doesn't know these unless an operator sets them.
     """
     now = datetime.now(timezone.utc).isoformat()
+    security: Dict[str, Any] = {
+        "cors": False,
+        "description": "X-API-Key authentication for this reference implementation",
+    }
+    if oauth_enabled:
+        security["service"] = [
+            codeable_concept(
+                "http://terminology.hl7.org/CodeSystem/restful-security-service",
+                "SMART-on-FHIR",
+                "SMART-on-FHIR",
+            )
+        ]
+        oauth_extension: Dict[str, Any] = {
+            "url": "http://fhir-registry.smarthealthit.org/StructureDefinition/oauth-uris",
+            "extension": [],
+        }
+        if authorization_endpoint:
+            oauth_extension["extension"].append(
+                {"url": "authorize", "valueUri": authorization_endpoint}
+            )
+        if token_endpoint:
+            oauth_extension["extension"].append({"url": "token", "valueUri": token_endpoint})
+        if oauth_extension["extension"]:
+            security["extension"] = [oauth_extension]
     return {
         "resourceType": "CapabilityStatement",
         "id": "medintelos-capability",
@@ -700,10 +739,7 @@ def build_capability_statement(base_url: str) -> Dict[str, Any]:
         "rest": [{
             "mode": "server",
             "documentation": "MedIntelOS FHIR R5 REST API",
-            "security": {
-                "cors": False,
-                "description": "X-API-Key authentication for this reference implementation"
-            },
+            "security": security,
             "resource": _build_resource_capabilities(),
             "interaction": [
                 {"code": "search-system"},
@@ -723,24 +759,30 @@ def build_capability_statement(base_url: str) -> Dict[str, Any]:
     }
 
 
+EXPORTABLE_RESOURCE_TYPES: List[str] = [
+    "Patient",
+    "Encounter",
+    "Observation",
+    "Condition",
+    "Procedure",
+    "MedicationRequest",
+    "DiagnosticReport",
+    "AllergyIntolerance",
+    "Immunization",
+    "CarePlan",
+    "ServiceRequest",
+    "Device",
+    "DocumentReference",
+    "Consent",
+    "AuditEvent",
+]
+
+
 def _build_resource_capabilities() -> List[Dict[str, Any]]:
     """Build the resource capability declarations for all supported resources."""
     resources = [
-        ("Patient", ["read", "update", "delete", "create", "search-type"]),
-        ("Encounter", ["read", "update", "delete", "create", "search-type"]),
-        ("Observation", ["read", "update", "delete", "create", "search-type"]),
-        ("Condition", ["read", "update", "delete", "create", "search-type"]),
-        ("Procedure", ["read", "update", "delete", "create", "search-type"]),
-        ("MedicationRequest", ["read", "update", "delete", "create", "search-type"]),
-        ("DiagnosticReport", ["read", "update", "delete", "create", "search-type"]),
-        ("AllergyIntolerance", ["read", "update", "delete", "create", "search-type"]),
-        ("Immunization", ["read", "update", "delete", "create", "search-type"]),
-        ("CarePlan", ["read", "update", "delete", "create", "search-type"]),
-        ("ServiceRequest", ["read", "update", "delete", "create", "search-type"]),
-        ("Device", ["read", "update", "delete", "create", "search-type"]),
-        ("DocumentReference", ["read", "update", "delete", "create", "search-type"]),
-        ("Consent", ["read", "update", "delete", "create", "search-type"]),
-        ("AuditEvent", ["read", "update", "delete", "create", "search-type"]),
+        (resource_type, ["read", "update", "delete", "create", "search-type"])
+        for resource_type in EXPORTABLE_RESOURCE_TYPES
     ]
 
     capabilities = []

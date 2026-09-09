@@ -33,6 +33,10 @@ class AuthContext:
     auth_method: str  # "api-key" | "oauth" | "disabled"
     scopes: frozenset[str]
     full_access: bool
+    # SMART launch-context, oauth-only; both None for api-key/disabled auth.
+    # See patient_compartment_permits() for how launch_patient is enforced.
+    fhir_user: str | None = None
+    launch_patient: str | None = None
 
     def __str__(self) -> str:
         # AuditChain.append(actor=...) expects a string; passing an
@@ -130,6 +134,8 @@ class CombinedAuthenticator:
                 auth_method="oauth",
                 scopes=principal.scopes,
                 full_access=False,
+                fhir_user=principal.fhir_user,
+                launch_patient=principal.launch_patient,
             )
 
         raise HTTPException(
@@ -167,4 +173,43 @@ def require_fhir_scope(
     return dependency
 
 
-__all__ = ["AuthContext", "CombinedAuthenticator", "require_fhir_scope", "scope_permits"]
+def patient_compartment_permits(
+    auth: AuthContext, resource_type: str, resource: dict[str, object]
+) -> bool:
+    """Restricts access to the patient named by a SMART launch context.
+
+    Only applies when `auth.launch_patient` is set (an OAuth token that
+    carried a `patient` launch-context claim); every other auth path is
+    unaffected — this never restricts an API-key client or a
+    non-launch-context OAuth client.
+
+    **Boundary, stated plainly:** enforced on read and search only (see
+    api/app.py). Create/update/delete do not yet check the launch patient
+    against the resource being written — a launch-scoped client could still
+    write data for a different patient. Closing that gap is tracked in
+    docs/ROADMAP.md. This is also not the full FHIR "Patient Compartment"
+    definition (which includes indirect relationships like a Practitioner's
+    other patients); it only checks a direct `subject` reference or the
+    Patient resource's own id.
+    """
+    if auth.launch_patient is None:
+        return True
+    if resource_type == "Patient":
+        return resource.get("id") == auth.launch_patient
+    subject = resource.get("subject")
+    if isinstance(subject, dict):
+        reference = subject.get("reference")
+        return reference in {auth.launch_patient, f"Patient/{auth.launch_patient}"}
+    # Resource type has no subject linkage MedIntelOS understands (e.g. it
+    # isn't Observation/Condition/MedicationRequest) — no compartment
+    # concept applies, so don't restrict it.
+    return True
+
+
+__all__ = [
+    "AuthContext",
+    "CombinedAuthenticator",
+    "patient_compartment_permits",
+    "require_fhir_scope",
+    "scope_permits",
+]

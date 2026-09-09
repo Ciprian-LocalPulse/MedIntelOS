@@ -22,3 +22,10 @@ class OAuthPrincipal:
     subject: str
     scopes: frozenset[str]
     claims: dict[str, Any]
+    # SMART launch-context claims, when present. Neither is required by
+    # OAuth/OIDC itself — they're SMART App Launch conventions carried in
+    # the access token by an authorization server that supports launch
+    # context. None when the token doesn't carry them (e.g. a
+    # client-credentials/system token with no launch context).
+    fhir_user: str | None = None
+    launch_patient: str | None = None

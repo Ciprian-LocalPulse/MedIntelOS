@@ -36,6 +36,13 @@ class Settings:
     oauth_audience: str | None = None
     oauth_jwks_url: str | None = None
     oauth_jwks_cache_seconds: int = 300
+    # Only used to populate /.well-known/smart-configuration (see
+    # api/app.py). MedIntelOS is a resource server, not an authorization
+    # server — it validates tokens but doesn't issue them — so these must be
+    # told to it explicitly; they can't be derived reliably from the issuer
+    # URL alone (the convention varies per identity provider).
+    oauth_authorization_endpoint: str | None = None
+    oauth_token_endpoint: str | None = None
 
     # In-memory, per-process token-bucket rate limiting. Not a substitute for
     # a shared limiter (e.g. Redis-backed) across multiple instances — see
@@ -73,6 +80,8 @@ class Settings:
                     "MEDINTELOS_OAUTH_JWKS_CACHE_SECONDS", str(cls.oauth_jwks_cache_seconds)
                 )
             ),
+            oauth_authorization_endpoint=os.getenv("MEDINTELOS_OAUTH_AUTHORIZATION_ENDPOINT"),
+            oauth_token_endpoint=os.getenv("MEDINTELOS_OAUTH_TOKEN_ENDPOINT"),
             rate_limit_enabled=_as_bool(os.getenv("MEDINTELOS_RATE_LIMIT_ENABLED", "true")),
             rate_limit_requests_per_minute=int(
                 os.getenv(

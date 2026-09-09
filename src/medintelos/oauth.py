@@ -122,7 +122,15 @@ class OIDCAuthenticator:
 
         scope_claim = claims.get("scope", "")
         scopes = frozenset(scope_claim.split()) if scope_claim else frozenset()
-        return OAuthPrincipal(subject=str(claims["sub"]), scopes=scopes, claims=claims)
+        fhir_user = claims.get("fhirUser")
+        launch_patient = claims.get("patient")
+        return OAuthPrincipal(
+            subject=str(claims["sub"]),
+            scopes=scopes,
+            claims=claims,
+            fhir_user=str(fhir_user) if fhir_user else None,
+            launch_patient=str(launch_patient) if launch_patient else None,
+        )
 
 
 __all__ = ["OAuthError", "OAuthPrincipal", "OIDCAuthenticator"]
