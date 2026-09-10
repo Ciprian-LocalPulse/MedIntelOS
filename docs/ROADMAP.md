@@ -79,11 +79,13 @@ Nothing here is a committed date; it is a dependency-ordered plan.
 
 ## 0.6.0 — CDSS evidence and conformance
 
-- [ ] Primary source citation attached to every rule in `cdss.py`
-  (already required for new rules by `CONTRIBUTING.md`; this milestone
-  back-fills the existing ones)
-- [ ] Boundary-value tests for every threshold, including missing-data paths
-- [ ] CDS Hooks conformance test suite
+- [x] Primary source citation attached to every rule in `cdss.py` — all were
+      already present and, on verification against primary sources, accurate
+- [x] Boundary-value tests for every threshold, including missing-data paths
+      — these tests found two real scoring defects (NEWS2 heart rate, AKI
+      absolute-creatinine-without-baseline) and a systemic truthy-check bug
+      that silently dropped measured values of 0; all fixed. See CHANGELOG.md.
+- [x] CDS Hooks conformance test suite
 - **Boundary:** clinical validation (analytical + clinical), human-factors
   studies, and regulatory review remain outside this repository, as stated in
   `docs/VALIDATION.md`.
