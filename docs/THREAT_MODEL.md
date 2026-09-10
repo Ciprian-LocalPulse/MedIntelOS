@@ -30,6 +30,7 @@ separate trust domains. Do not infer trust from network location alone.
 | Clinical automation bias | Explicit warnings and deterministic explanations | Human-factors testing, governance, monitoring, override review |
 | Denial of service | Body-size limit, bounded API request lists, per-client rate limiting | Gateway limits, queues, autoscaling, circuit breakers |
 | Audit chain forgery/loss | Hash-chained entries; Postgres backend serializes appends via advisory lock so concurrent writers can't fork the chain (0.4.0) | Independent anchoring (e.g. periodic external timestamping), WORM storage, backup of the audit database itself |
+| Bulk export job access | System-level `$export` restricted to full-access credentials; job ids are unguessable UUIDs (0.5.0) | Per-principal job ownership checks (any authenticated caller who has a job id can currently poll/download it — see `fhir/bulk_export.py`), durable job storage instead of in-process memory |
 
 ## Non-Goals
 

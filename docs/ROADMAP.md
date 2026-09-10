@@ -50,12 +50,32 @@ Nothing here is a committed date; it is a dependency-ordered plan.
 
 ## 0.5.0 — FHIR interoperability depth
 
-- [ ] Profile validation against one named base (US Core or IPS — decided
-      before work starts, tracked in an issue)
-- [ ] Minimal terminology binding for codes already used by CDSS rules
-- [ ] SMART App Launch
-- [ ] `$export` (Bulk Data) for the resource types already supported
-- **Boundary:** not a full terminology server; not FHIR-certified.
+- [x] Profile validation — **revised from the original plan.** Neither US
+      Core nor the International Patient Summary (IPS) has a published FHIR
+      R5 version as of this milestone (both are R4-based); adapting their R4
+      profiles to R5 resources would have produced validation that looked
+      authoritative but wasn't. Implemented instead: MedIntelOS's own
+      required-element checks straight from the FHIR R5 base specification,
+      exposed via the `$validate` operation (`fhir/validation.py`) —
+      explicitly documented as not a conformance claim against any external
+      IG. Revisit once US Core or IPS publish an R5 release.
+- [x] Minimal terminology binding for codes already used by CDSS rules
+      (`fhir/terminology.py` — vital-signs LOINC codes, checked as
+      warnings via `$validate`, not hard errors)
+- [x] SMART App Launch — resource-server side only: `.well-known/smart-configuration`
+      discovery document, `oauth-uris` CapabilityStatement extension,
+      `fhirUser`/launch-context `patient` claim propagation, and
+      patient-compartment enforcement on read/search (not yet on
+      create/update/delete — see `api/auth.py`'s `patient_compartment_permits`
+      docstring). The authorization-code flow itself is the identity
+      provider's responsibility, not this resource server's.
+- [x] `$export` (Bulk Data) — kick-off/poll/download pattern modeled on
+      HL7's Bulk Data Access IG, for the resource types already supported.
+      Runs synchronously in-process (`fhir/bulk_export.py`'s documented
+      boundary: not durable, not shared across instances, not sized for
+      large datasets — real async job processing is future work).
+- **Boundary:** not a terminology server; not FHIR-certified; `$export`
+  jobs are in-memory and single-process.
 
 ## 0.6.0 — CDSS evidence and conformance
 

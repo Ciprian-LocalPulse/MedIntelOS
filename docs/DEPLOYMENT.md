@@ -146,16 +146,76 @@ docker compose exec -T db psql -U medintelos medintelos < backup.sql
 Schedule this, store backups off the host running the database, and test
 restores — an untested backup is not a backup.
 
+## FHIR Interoperability (0.5.0)
+
+### `$validate`
+
+`POST /fhir/R5/{resourceType}/$validate` checks required elements (per the
+FHIR R5 base spec) and, for vital-signs Observations, the LOINC code
+against a small local table. Returns an `OperationOutcome`; never persists
+anything. **This is not US Core or IPS conformance** — neither IG has a
+published FHIR R5 version as of this writing, so validating against either
+would misrepresent what's actually being checked. See
+`fhir/validation.py`'s module docstring for exact scope.
+
+### SMART App Launch (resource-server side)
+
+With `MEDINTELOS_OAUTH_ENABLED=true`:
+- `GET /fhir/R5/.well-known/smart-configuration` — discovery document.
+  Set `MEDINTELOS_OAUTH_AUTHORIZATION_ENDPOINT` and
+  `MEDINTELOS_OAUTH_TOKEN_ENDPOINT` so it advertises your actual identity
+  provider's endpoints — MedIntelOS validates tokens, it doesn't issue them,
+  so it can't derive these on its own.
+- The `CapabilityStatement` (`GET /fhir/R5/metadata`) carries the same
+  information via the `oauth-uris` extension for clients that discover via
+  CapabilityStatement instead of `.well-known`.
+- A token with a `patient` claim (SMART launch context) restricts that
+  caller's `read`/search to the named patient's compartment — a request for
+  another patient's data returns `403`, and search results are filtered
+  rather than erroring. **Not yet enforced on create/update/delete** — see
+  `api/auth.py`'s `patient_compartment_permits` docstring.
+- A token's `fhirUser` claim, when present, is available on `AuthContext`
+  but not yet used anywhere further.
+
+### `$export` (Bulk Data)
+
+```
+GET /fhir/R5/$export                    # every resource type
+GET /fhir/R5/{resourceType}/$export     # one resource type
+```
+
+Both require `Prefer: respond-async`. Response is `202` with a
+`Content-Location` pointing at the status endpoint:
+
+```
+GET /fhir/R5/$export-status/{job_id}      # manifest once ready
+GET /fhir/R5/$export-files/{job_id}/{Type}.ndjson   # download
+DELETE /fhir/R5/$export-status/{job_id}   # cancel
+```
+
+System-level `$export` requires a full-access (API-key) credential — an
+OAuth-scoped client gets `403` and should use the type-level export for
+whichever resource type its scope actually covers.
+
+**Boundary:** jobs run synchronously at kick-off and live in process memory
+only (`fhir/bulk_export.py`). They do not survive a restart, are not shared
+across multiple API instances, and this is not sized for large datasets. A
+production Bulk Data deployment needs a real background job queue and
+durable/object storage for the NDJSON output — not implemented here.
+
 ## Production Readiness Gate
 
 Do not expose the reference container to patient data. `MEDINTELOS_FHIR_BACKEND=postgres`
-replaces volatile storage, and `MEDINTELOS_OAUTH_ENABLED=true` plus rate
-limiting cover authentication and abuse throttling for a single instance —
-but a production program must still add TLS termination, validate FHIR
-profiles and terminology (0.5.0), encrypt durable data at rest, isolate
-tenants, automate and test backups beyond the manual `pg_dump` steps above,
-add a shared (multi-instance) rate limiter, monitor security events, and
-complete clinical and regulatory validation (0.6.0).
+replaces volatile storage, `MEDINTELOS_OAUTH_ENABLED=true` plus rate
+limiting cover authentication and abuse throttling for a single instance,
+and `$validate`/`$export` add interoperability surface — but a production
+program must still add TLS termination, adopt a real terminology server and
+a published conformance profile once one exists for R5, encrypt durable
+data at rest, isolate tenants, automate and test backups beyond the manual
+`pg_dump` steps above, add a shared (multi-instance) rate limiter and a
+durable/shared `$export` job backend, extend patient-compartment
+enforcement to writes, monitor security events, and complete clinical and
+regulatory validation (0.6.0).
 
 ## Contract Deployment
 

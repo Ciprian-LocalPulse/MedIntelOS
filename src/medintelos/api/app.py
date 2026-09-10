@@ -10,7 +10,12 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, s
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-from medintelos.api.auth import AuthContext, CombinedAuthenticator, require_fhir_scope
+from medintelos.api.auth import (
+    AuthContext,
+    CombinedAuthenticator,
+    patient_compartment_permits,
+    require_fhir_scope,
+)
 from medintelos.api.schemas import CDSHooksRequest, CDSSRequest, PatientContextRequest
 from medintelos.audit import AuditChain
 from medintelos.audit_protocol import AuditChainProtocol
@@ -22,10 +27,22 @@ from medintelos.cdss import (
     VitalSigns,
 )
 from medintelos.config import Settings
-from medintelos.fhir.builders import BundleType, FHIRBundleBuilder, build_capability_statement
+from medintelos.fhir.builders import (
+    EXPORTABLE_RESOURCE_TYPES,
+    BundleType,
+    FHIRBundleBuilder,
+    build_capability_statement,
+)
+from medintelos.fhir.bulk_export import (
+    ExportJob,
+    ExportJobRegistry,
+    ExportOutput,
+    resources_to_ndjson,
+)
 from medintelos.fhir.exceptions import FHIRStoreError, ResourceNotFound, VersionConflict
 from medintelos.fhir.repository import FHIRStore
 from medintelos.fhir.store_protocol import FHIRStoreProtocol
+from medintelos.fhir.validation import build_operation_outcome, has_errors, validate_resource
 from medintelos.rate_limit import TokenBucketLimiter
 
 
@@ -120,6 +137,7 @@ def create_app(
     app.state.fhir_store = _build_fhir_store(settings)
     app.state.audit = _build_audit_chain(settings)
     app.state.cdss = CDSSEngine()
+    app.state.export_jobs = ExportJobRegistry()
 
     oidc = None
     if settings.oauth_enabled:
@@ -237,7 +255,188 @@ def create_app(
 
     @app.get("/fhir/R5/metadata", tags=["FHIR R5"])
     async def metadata() -> dict[str, Any]:
-        return build_capability_statement(settings.fhir_base_url)
+        return build_capability_statement(
+            settings.fhir_base_url,
+            oauth_enabled=settings.oauth_enabled,
+            authorization_endpoint=settings.oauth_authorization_endpoint,
+            token_endpoint=settings.oauth_token_endpoint,
+        )
+
+    @app.get("/fhir/R5/.well-known/smart-configuration", tags=["FHIR R5"])
+    async def smart_configuration() -> JSONResponse:
+        if not settings.oauth_enabled:
+            return JSONResponse(
+                status_code=404,
+                content=operation_outcome(
+                    "OAuth2/OIDC is not enabled on this server "
+                    "(MEDINTELOS_OAUTH_ENABLED=false)",
+                    "not-supported",
+                ),
+            )
+        # MedIntelOS validates tokens (resource server); it does not issue
+        # them. authorization_endpoint/token_endpoint must be configured by
+        # the operator to point at the actual identity provider — see
+        # config.py's oauth_authorization_endpoint/oauth_token_endpoint.
+        document: dict[str, Any] = {
+            "issuer": settings.oauth_issuer,
+            "jwks_uri": settings.oauth_jwks_url,
+            "grant_types_supported": ["authorization_code", "client_credentials"],
+            "response_types_supported": ["code"],
+            "capabilities": [
+                "launch-standalone",
+                "client-confidential-symmetric",
+                "context-standalone-patient",
+                "permission-patient",
+                "permission-user",
+                "sso-openid-connect",
+            ],
+            "scopes_supported": [
+                "openid",
+                "fhirUser",
+                "launch",
+                "launch/patient",
+                "patient/*.read",
+                "patient/*.write",
+                "user/*.read",
+                "user/*.write",
+            ],
+            "code_challenge_methods_supported": ["S256"],
+        }
+        if settings.oauth_authorization_endpoint:
+            document["authorization_endpoint"] = settings.oauth_authorization_endpoint
+        if settings.oauth_token_endpoint:
+            document["token_endpoint"] = settings.oauth_token_endpoint
+        return JSONResponse(content=document)
+
+    def _run_export(resource_types: list[str], request_url: str) -> ExportJob:
+        outputs = []
+        for resource_type in resource_types:
+            resources = app.state.fhir_store.search(resource_type, {})
+            if not resources:
+                continue
+            outputs.append(
+                ExportOutput(
+                    resource_type=resource_type,
+                    count=len(resources),
+                    ndjson=resources_to_ndjson(resources),
+                )
+            )
+        app.state.export_jobs.evict_stale()
+        return app.state.export_jobs.create(request_url=request_url, outputs=outputs)
+
+    @app.get("/fhir/R5/$export", tags=["FHIR R5 Bulk Data"])
+    async def system_export(
+        request: Request,
+        response: Response,
+        auth: AuthContext = Depends(authenticate),
+    ) -> Response:
+        # System-level export spans every resource type regardless of the
+        # caller's scopes, so — unlike every other FHIR route in this file —
+        # it's restricted to full-access (API-key) callers rather than
+        # enforced per-resource-type via require_fhir_scope. A narrowly
+        # scoped OAuth client should use the type-level export below
+        # instead.
+        if not auth.full_access:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="System-level $export requires a full-access (API-key) credential",
+            )
+        if "respond-async" not in request.headers.get("prefer", ""):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="$export requires a 'Prefer: respond-async' header (Bulk Data Access pattern)",
+            )
+        job = await run_in_threadpool(
+            _run_export, EXPORTABLE_RESOURCE_TYPES, str(request.url)
+        )
+        app.state.audit.append(
+            actor=auth.actor,
+            action="fhir.export.kickoff",
+            resource="$export",
+            metadata={"job_id": job.job_id, "resource_types": "system"},
+        )
+        response.status_code = status.HTTP_202_ACCEPTED
+        response.headers["Content-Location"] = f"{settings.fhir_base_url}/fhir/R5/$export-status/{job.job_id}"
+        return response
+
+    @app.get("/fhir/R5/{resource_type}/$export", tags=["FHIR R5 Bulk Data"])
+    async def type_export(
+        resource_type: str,
+        request: Request,
+        response: Response,
+        auth: AuthContext = Depends(require_read),
+    ) -> Response:
+        if "respond-async" not in request.headers.get("prefer", ""):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="$export requires a 'Prefer: respond-async' header (Bulk Data Access pattern)",
+            )
+        job = await run_in_threadpool(_run_export, [resource_type], str(request.url))
+        app.state.audit.append(
+            actor=auth.actor,
+            action="fhir.export.kickoff",
+            resource=resource_type,
+            metadata={"job_id": job.job_id, "resource_types": resource_type},
+        )
+        response.status_code = status.HTTP_202_ACCEPTED
+        response.headers["Content-Location"] = f"{settings.fhir_base_url}/fhir/R5/$export-status/{job.job_id}"
+        return response
+
+    @app.get("/fhir/R5/$export-status/{job_id}", tags=["FHIR R5 Bulk Data"])
+    async def export_status(
+        job_id: str,
+        auth: AuthContext = Depends(authenticate),
+    ) -> dict[str, Any]:
+        # Boundary: job access isn't restricted to the principal that kicked
+        # it off — any authenticated caller who knows (or guesses) a job_id
+        # can poll or download it. Job ids are UUIDs (unguessable in
+        # practice), but this is still weaker than real per-principal
+        # authorization; see fhir/bulk_export.py's module docstring.
+        job = app.state.export_jobs.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail=f"Export job {job_id} not found")
+        return job.to_manifest(f"{settings.fhir_base_url}/fhir/R5/$export-files")
+
+    @app.delete("/fhir/R5/$export-status/{job_id}", status_code=202, tags=["FHIR R5 Bulk Data"])
+    async def cancel_export(
+        job_id: str,
+        auth: AuthContext = Depends(authenticate),
+    ) -> Response:
+        app.state.export_jobs.delete(job_id)
+        return Response(status_code=202)
+
+    @app.get("/fhir/R5/$export-files/{job_id}/{filename}", tags=["FHIR R5 Bulk Data"])
+    async def export_file(
+        job_id: str,
+        filename: str,
+        auth: AuthContext = Depends(authenticate),
+    ) -> Response:
+        job = app.state.export_jobs.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail=f"Export job {job_id} not found")
+        resource_type = filename.removesuffix(".ndjson")
+        for output in job.outputs:
+            if output.resource_type == resource_type:
+                return Response(content=output.ndjson, media_type="application/fhir+ndjson")
+        raise HTTPException(status_code=404, detail=f"No {filename} in export job {job_id}")
+
+    @app.post("/fhir/R5/{resource_type}/$validate", tags=["FHIR R5"])
+    async def validate_resource_route(
+        resource_type: str,
+        resource: dict[str, Any],
+        response: Response,
+        auth: AuthContext = Depends(require_read),
+    ) -> dict[str, Any]:
+        issues = validate_resource(resource_type, resource)
+        outcome = build_operation_outcome(issues)
+        response.status_code = 200 if not has_errors(issues) else 422
+        app.state.audit.append(
+            actor=auth.actor,
+            action="fhir.validate",
+            resource=resource_type,
+            metadata={"issue_count": len(issues), "has_errors": has_errors(issues)},
+        )
+        return outcome
 
     @app.post("/fhir/R5/{resource_type}", status_code=201, tags=["FHIR R5"])
     async def create_resource(
@@ -261,6 +460,11 @@ def create_app(
         auth: AuthContext = Depends(require_read),
     ) -> dict[str, Any]:
         resource = await run_in_threadpool(app.state.fhir_store.read, resource_type, resource_id)
+        if not patient_compartment_permits(auth, resource_type, resource):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This resource is outside the token's launch-context patient",
+            )
         response.headers["ETag"] = f"W/\"{resource['meta']['versionId']}\""
         app.state.audit.append(
             actor=auth.actor,
@@ -283,6 +487,9 @@ def create_app(
         }
         matches = (await run_in_threadpool(app.state.fhir_store.search, resource_type, params))[
             :count
+        ]
+        matches = [
+            match for match in matches if patient_compartment_permits(auth, resource_type, match)
         ]
         app.state.audit.append(
             actor=auth.actor,
