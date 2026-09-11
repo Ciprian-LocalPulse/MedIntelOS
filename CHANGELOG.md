@@ -2,7 +2,12 @@
 
 All notable changes will be documented here.
 
-## Unreleased (targeting 0.6.0 — CDSS evidence and conformance)
+## [0.6.0] - 2026-09-10
+
+This release bundles milestones 0.2.0 through 0.6.0 from `docs/ROADMAP.md`,
+merged incrementally into `main` as separate PRs and released together here.
+
+### CDSS evidence and conformance (0.6.0)
 
 - **Fixed two real clinical scoring defects**, found while verifying every
   citation and threshold in `cdss.py` against their published sources
@@ -35,16 +40,9 @@ All notable changes will be documented here.
   Hooks `Card.indicator` value — it was renamed to `"critical"` in the spec
   in 2018. Actual card construction was already correct; only the comment
   was wrong.
-- Added `tests/test_cdss_boundaries.py`: every threshold in every rule
-  tested at its exact boundary, plus missing-data and zero-value paths —
-  the tests that caught the defects above.
-- Added `tests/test_cds_hooks_conformance.py`: discovery response and
-  every card shape (summary length, indicator validity, source, and the
-  suggestions/selectionBehavior pairing requirement) checked against the
-  current CDS Hooks specification, driven through the real evaluation
-  pipeline rather than hand-built fixtures.
+- Added `tests/test_cdss_boundaries.py` and `tests/test_cds_hooks_conformance.py`.
 
-## Unreleased (targeting 0.5.0 — FHIR interoperability depth)
+### FHIR interoperability depth (0.5.0)
 
 - **Plan revision, documented before implementation:** researched current
   publication status of US Core and IPS — neither has a FHIR R5 release
@@ -60,72 +58,45 @@ All notable changes will be documented here.
   CapabilityStatement extension (SMART App Launch discovery, resource-server
   side only).
 - Added `fhirUser` and launch-context `patient` claim propagation from
-  OAuth tokens into `AuthContext`.
-- Added patient-compartment enforcement (`patient_compartment_permits`) on
-  FHIR read and search when a token carries a launch-context patient.
-  Documented boundary: not yet enforced on create/update/delete.
+  OAuth tokens into `AuthContext`, plus patient-compartment enforcement on
+  FHIR read and search (not yet on create/update/delete).
 - Added Bulk Data `$export` (system- and type-level kick-off, status
-  polling, NDJSON download, cancellation) modeled on HL7's Bulk Data Access
-  pattern. Runs synchronously in-process — see `fhir/bulk_export.py`'s
-  documented non-durable, single-process boundary. System-level export is
-  restricted to full-access (API-key) callers.
+  polling, NDJSON download, cancellation), modeled on HL7's Bulk Data
+  Access pattern. Runs synchronously in-process — see
+  `fhir/bulk_export.py`'s documented non-durable, single-process boundary.
 
-## Unreleased (targeting 0.4.0 — Production-grade authentication)
+### Production-grade authentication (0.4.0)
 
 - Added OAuth2/OIDC bearer-token authentication (`oauth.py`,
   `api/auth.py`'s `CombinedAuthenticator`), alongside the existing API-key
   path. Disabled by default (`MEDINTELOS_OAUTH_ENABLED=false`).
-- Added SMART v1-style scope enforcement on FHIR routes
-  (`require_fhir_scope`, `scope_permits`). API-key clients remain full-access
-  (system-level), matching prior behavior; OAuth clients are scope-limited.
-- Added in-memory token-bucket rate limiting (`rate_limit.py`), enabled by
-  default, with a `Retry-After` header on `429`. `/health` is exempt.
-- Added `PostgresAuditChain`, a durable, hash-chain-compatible audit backend
-  selected via `MEDINTELOS_AUDIT_BACKEND=postgres`, serialized across
-  processes with a Postgres advisory lock. Extracted the hashing logic
-  (`compute_entry_hash`) so both audit backends produce identical hashes for
-  identical inputs.
-- Added migration `0002_audit_entries.py`.
+- Added SMART v1-style scope enforcement on FHIR routes. API-key clients
+  remain full-access (system-level); OAuth clients are scope-limited.
+- Added in-memory token-bucket rate limiting, enabled by default, with a
+  `Retry-After` header on `429`. `/health` is exempt.
+- Added `PostgresAuditChain`, a durable, hash-chain-compatible audit
+  backend, serialized across processes with a Postgres advisory lock.
 - Marked `security.py`'s `APIKeyAuthenticator` as superseded by
-  `CombinedAuthenticator` (kept for backward compatibility; logic unchanged).
+  `CombinedAuthenticator` (kept for backward compatibility).
 
-## Unreleased (targeting 0.3.0 — Persistent FHIR store)
+### Persistent FHIR store (0.3.0)
 
-- Added `PostgresFHIRStore`, a drop-in Postgres-backed implementation of the
-  FHIR store interface, selected via `MEDINTELOS_FHIR_BACKEND=postgres`. The
-  in-memory store remains the default and is unaffected.
-- Added Alembic migrations (`migrations/`), starting with the
-  `fhir_resources` table.
-- Added `docker-compose.postgres.yml`, an opt-in override adding a `db`
-  service and a one-shot `migrate` service; the default `docker-compose.yml`
-  is unchanged.
-- Added `tests/test_postgres_fhir.py`, run in CI against a real Postgres
-  service container; skipped locally unless `MEDINTELOS_TEST_DATABASE_URL`
-  is set.
-- Fixed: FHIR store calls in `api/app.py` were synchronous and blocking
-  inside `async def` route handlers. Harmless with the in-memory backend,
-  but would have blocked the event loop under real load once backed by
-  network I/O. Now wrapped in `run_in_threadpool`.
-- Fixed: replaced the deprecated `@app.on_event("shutdown")` with FastAPI's
-  `lifespan` context manager, which now also closes the Postgres connection
-  pool cleanly on shutdown.
-- Documented backup/restore and migration workflow in `docs/DEPLOYMENT.md`.
+- Added `PostgresFHIRStore`, selected via `MEDINTELOS_FHIR_BACKEND=postgres`.
+  The in-memory store remains the default.
+- Added Alembic migrations, `docker-compose.postgres.yml` opt-in override.
+- Fixed: FHIR store calls in `api/app.py` were synchronous/blocking inside
+  `async def` route handlers; wrapped in `run_in_threadpool`.
+- Fixed: replaced deprecated `@app.on_event("shutdown")` with FastAPI's
+  `lifespan` context manager.
 
-## Unreleased (targeting 0.2.0 — Governance and CI hardening)
+### Governance and CI hardening (0.2.0)
 
 - Fixed `mypy` configuration: `python_version = "3.11"` made mypy crash
   immediately against current `numpy` type stubs, so the check documented in
   `CONTRIBUTING.md` and `docs/VALIDATION.md` was not actually running.
-  `python_version` is now `3.12`.
-- Added `mypy src/medintelos` as a required step in `.github/workflows/ci.yml`
-  (previously only `ruff check .` and `pytest` were enforced).
-- Added `.github/CODEOWNERS` for clinical, security, and contract-adjacent
-  paths.
-- Added `.github/ISSUE_TEMPLATE/feature_request.yml`.
-- Added `docs/ROADMAP.md` with dependency-ordered milestones through 1.0.0.
-- Added `docs/GOVERNANCE.md` (branch protection, versioning, release process).
-- Added `docs/CONTRACT_AUDIT_CHECKLIST.md` gating any non-testnet deployment
-  of the consent/audit contracts on an external audit.
+- Added `mypy src/medintelos` as a required CI step, `.github/CODEOWNERS`,
+  feature-request issue template, `docs/ROADMAP.md`, `docs/GOVERNANCE.md`,
+  `docs/CONTRACT_AUDIT_CHECKLIST.md`.
 
 ## 0.1.0 - 2026-06-14
 

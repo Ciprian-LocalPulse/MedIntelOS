@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "medintelos"
-version = "0.1.0"
+version = "0.6.0"
 description = "Open reference implementation for FHIR R5, CDS Hooks, federated-learning experiments, and consent research."
 readme = "README.md"
 requires-python = ">=3.11"
