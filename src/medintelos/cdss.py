@@ -129,7 +129,9 @@ class ClinicalAlert:
     title: str = ""
     detail: str = ""
     source: str = "MedIntelOS CDSS"
-    indicator: str = "info"       # CDS Hooks: info | warning | critical | hard-stop
+    indicator: str = "info"       # CDS Hooks Card.indicator: info | warning | critical
+    # ("hard-stop" was renamed to "critical" in the CDS Hooks spec in 2018
+    # (hl7/cds-hooks#340) and is not a valid value here.)
     suggestions: List[Dict[str, Any]] = field(default_factory=list)
     links: List[Dict[str, str]] = field(default_factory=list)
     overridable: bool = True
@@ -182,13 +184,17 @@ class RiskScorer:
         explanation: Dict[str, float] = {}
         recommendations = []
 
-        if vitals.respiratory_rate and vitals.respiratory_rate >= 22:
+        # `is not None` (not a truthy check): a measured value of 0 — e.g.
+        # respiratory_rate=0 (apnea) or systolic_bp=0 — is a real, critical
+        # value, not the same thing as "not measured". A truthy check would
+        # silently treat 0 as missing and skip scoring it.
+        if vitals.respiratory_rate is not None and vitals.respiratory_rate >= 22:
             score += 1
             explanation["respiratory_rate_ge_22"] = 1.0
-        if vitals.gcs and vitals.gcs < 15:
+        if vitals.gcs is not None and vitals.gcs < 15:
             score += 1
             explanation["altered_mentation_gcs_lt_15"] = 1.0
-        if vitals.systolic_bp and vitals.systolic_bp <= 100:
+        if vitals.systolic_bp is not None and vitals.systolic_bp <= 100:
             score += 1
             explanation["systolic_bp_le_100"] = 1.0
 
@@ -230,13 +236,31 @@ class RiskScorer:
         Royal College of Physicians validated deterioration score.
         Range: 0–20. Score ≥7 = urgent response required.
 
-        Reference: Royal College of Physicians. NEWS2. 2017.
+        Reference: Royal College of Physicians. National Early Warning Score
+        (NEWS) 2: Standardising the assessment of acute-illness severity in
+        the NHS. Updated report of a working party. London: RCP, 2017.
+
+        Boundary: implements SpO2 Scale 1 only (the default scale for most
+        patients). NEWS2 defines an alternate Scale 2 for patients with
+        target oxygen saturation 88-92% (e.g. COPD with chronic hypercapnic
+        respiratory failure), which scores the same saturation differently
+        under a qualified clinician's direction. `VitalSigns` has no field
+        indicating a patient is on a Scale 2 target, so this implementation
+        cannot select it — Scale 1 is used unconditionally. For patients who
+        should be on Scale 2, this will under-score risk. See docs/ROADMAP.md.
         """
         score = 0
         explanation: Dict[str, float] = {}
 
+        # Every check below uses `is not None` (not a truthy check): a
+        # measured value of 0 — e.g. respiratory_rate=0 (apnea) or
+        # heart_rate=0 (asystole) — is a real, critical value, not the same
+        # thing as "not measured". A truthy check would silently treat 0 as
+        # missing and skip scoring it entirely, which is exactly backwards
+        # for values where 0 is the most dangerous reading possible.
+
         # Respiratory rate (breaths/min)
-        if vitals.respiratory_rate:
+        if vitals.respiratory_rate is not None:
             rr = vitals.respiratory_rate
             if rr <= 8:
                 pts = 3
@@ -251,8 +275,8 @@ class RiskScorer:
             score += pts
             explanation["respiratory_rate"] = float(pts)
 
-        # SpO2 (%)
-        if vitals.spo2:
+        # SpO2 Scale 1 (%) — see boundary note in the docstring above.
+        if vitals.spo2 is not None:
             spo2 = vitals.spo2
             if spo2 <= 91:
                 pts = 3
@@ -266,7 +290,7 @@ class RiskScorer:
             explanation["spo2"] = float(pts)
 
         # Systolic BP (mmHg)
-        if vitals.systolic_bp:
+        if vitals.systolic_bp is not None:
             sbp = vitals.systolic_bp
             if sbp <= 90:
                 pts = 3
@@ -281,13 +305,16 @@ class RiskScorer:
             score += pts
             explanation["systolic_bp"] = float(pts)
 
-        # Heart rate (bpm)
-        if vitals.heart_rate:
+        # Heart rate (bpm). Per the RCP chart: <=40->3, 41-50->2, 51-90->0,
+        # 91-110->1, 111-130->2, >=131->3. (A prior version of this function
+        # scored 41-50 as 1, not 2 — under-scoring bradycardia relative to
+        # the published chart. Fixed; see CHANGELOG.md.)
+        if vitals.heart_rate is not None:
             hr = vitals.heart_rate
             if hr <= 40:
                 pts = 3
             elif hr <= 50:
-                pts = 1
+                pts = 2
             elif hr <= 90:
                 pts = 0
             elif hr <= 110:
@@ -300,7 +327,7 @@ class RiskScorer:
             explanation["heart_rate"] = float(pts)
 
         # Temperature (°C)
-        if vitals.temperature:
+        if vitals.temperature is not None:
             temp = vitals.temperature
             if temp <= 35.0:
                 pts = 3
@@ -316,7 +343,10 @@ class RiskScorer:
             explanation["temperature"] = float(pts)
 
         # GCS
-        if vitals.gcs:
+        # GCS (valid range is 3-15; never 0, but `is not None` is used
+        # consistently with every other check above rather than relying on
+        # that being true forever)
+        if vitals.gcs is not None:
             if vitals.gcs < 15:
                 score += 3
                 explanation["consciousness"] = 3.0
@@ -377,16 +407,26 @@ class RiskScorer:
         explanation: Dict[str, float] = {}
         recommendations = []
 
+        # Absolute-value criterion: checked independently of baseline
+        # availability. A prior version of this function only checked this
+        # when a baseline creatinine was available, so a patient presenting
+        # with e.g. Cr 4.5 mg/dL and no known baseline (common at initial
+        # presentation, before any prior labs exist) was scored stage 0 —
+        # missing severe AKI entirely. Fixed; see CHANGELOG.md.
+        if current_creatinine >= 4.0:
+            stage = max(stage, 3)
+            explanation["absolute_creatinine_ge_4_mg_dl"] = 1.0
+
         if baseline_creatinine and baseline_creatinine > 0:
             ratio = current_creatinine / baseline_creatinine
             explanation["creatinine_ratio"] = round(ratio, 2)
 
-            if ratio >= 3.0 or current_creatinine >= 4.0:
-                stage = 3
+            if ratio >= 3.0:
+                stage = max(stage, 3)
             elif ratio >= 2.0:
-                stage = 2
+                stage = max(stage, 2)
             elif ratio >= 1.5:
-                stage = 1
+                stage = max(stage, 1)
 
         # Urine output check
         if urine_output_ml_hr is not None:

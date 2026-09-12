@@ -2,7 +2,77 @@
 
 All notable changes will be documented here.
 
-## Unreleased (targeting 0.5.0 — FHIR interoperability depth)
+## Unreleased (targeting 0.7.0 — Federated learning hardening)
+
+- **Plan revision, documented before implementation:** "mTLS between
+  coordinator and participants" assumed a network transport that doesn't
+  exist — `FederatedCoordinator` calls participants via an in-process
+  Python callable, not over a network. Implementing mTLS with nothing to
+  secure would have been security theater; deferred to a future milestone
+  that adds an actual client-server protocol. See `docs/ROADMAP.md` 0.7.0.
+- **Fixed a real defect: differential privacy's declared `epsilon`/`delta`
+  were purely decorative.** `noise_multiplier` was a fixed constant (1.1)
+  that config's `epsilon`/`delta` never influenced. Verified empirically:
+  at that fixed value, a *single* round already cost epsilon≈4.24 at
+  delta=1e-5 — far weaker than the config's own epsilon=1.0 default
+  suggested — and cumulative epsilon after 100 rounds was ≈83 (essentially
+  no protection). Replaced with real accounting via Google's
+  `dp_accounting` library (RDP accounting): `noise_multiplier` is now
+  calibrated so that running the planned number of rounds costs exactly
+  the declared `epsilon`, and `FederatedCoordinator.get_status()` reports
+  the actual cumulative epsilon spent, not just the declared target.
+  `DifferentialPrivacyConfig.noise_multiplier` may still be set explicitly
+  to bypass calibration; the accountant then reports the real (possibly
+  worse-than-declared) epsilon honestly instead of hiding it.
+- Added standardized ONNX-based model weight serialization
+  (`model_serialization.py`), replacing the previous
+  `json.dumps(array.tolist())` approach that had no real serialize/
+  deserialize path (it was only ever used for a hash) and couldn't
+  distinguish a float32 array from a float64 array with identical values.
+  `FederatedCoordinator._hash_model` now uses the ONNX-based canonical hash.
+- Added `tests/test_dp_accounting.py` and `tests/test_model_serialization.py`.
+
+## [0.6.0] - 2026-09-10
+
+This release bundles milestones 0.2.0 through 0.6.0 from `docs/ROADMAP.md`,
+merged incrementally into `main` as separate PRs and released together here.
+
+### CDSS evidence and conformance (0.6.0)
+
+- **Fixed two real clinical scoring defects**, found while verifying every
+  citation and threshold in `cdss.py` against their published sources
+  (not just adding citations to already-correct code):
+  - **NEWS2 heart rate 41-50 bpm was scoring 1 point instead of 2** per the
+    published Royal College of Physicians chart — under-scoring
+    bradycardia and potentially delaying escalation.
+  - **AKI KDIGO's absolute creatinine ≥4.0 mg/dL (stage 3) criterion only
+    fired when a baseline creatinine was also available.** A patient
+    presenting with e.g. Cr 4.5 mg/dL and no known baseline — common at
+    initial presentation, before any prior labs exist — was scored stage 0,
+    missing severe AKI entirely.
+- **Fixed a systemic truthy-check bug** in `qsofa()` and `news2()`: vitals
+  were checked with `if vitals.heart_rate:` instead of
+  `if vitals.heart_rate is not None:`, so a genuinely measured value of
+  **0** (e.g. respiratory_rate=0/apnea, heart_rate=0/asystole — the most
+  dangerous possible readings) was silently treated identically to "not
+  measured" and skipped. `LabResult.is_critical`/`is_abnormal` already used
+  `is not None` correctly; this brought the vital-sign checks in line with
+  that existing discipline.
+- Verified (via primary-source search, not from memory) every existing
+  citation in `cdss.py` — qSOFA (Singer et al., JAMA 2016), NEWS2 (RCP
+  2017), KDIGO AKI (2012), CHA2DS2-VASc (Lip et al., Chest 2010) including
+  its published annual-stroke-risk table — against their sources. All were
+  already accurate; the NEWS2 reference was expanded to the full citation.
+- Documented NEWS2's SpO2 Scale 1-only boundary explicitly (Scale 2, for
+  patients with a target 88-92% saturation range, is not implemented —
+  `VitalSigns` has no field to indicate that clinical context).
+- Corrected a stale code comment claiming `"hard-stop"` is a valid CDS
+  Hooks `Card.indicator` value — it was renamed to `"critical"` in the spec
+  in 2018. Actual card construction was already correct; only the comment
+  was wrong.
+- Added `tests/test_cdss_boundaries.py` and `tests/test_cds_hooks_conformance.py`.
+
+### FHIR interoperability depth (0.5.0)
 
 - **Plan revision, documented before implementation:** researched current
   publication status of US Core and IPS — neither has a FHIR R5 release
@@ -18,72 +88,45 @@ All notable changes will be documented here.
   CapabilityStatement extension (SMART App Launch discovery, resource-server
   side only).
 - Added `fhirUser` and launch-context `patient` claim propagation from
-  OAuth tokens into `AuthContext`.
-- Added patient-compartment enforcement (`patient_compartment_permits`) on
-  FHIR read and search when a token carries a launch-context patient.
-  Documented boundary: not yet enforced on create/update/delete.
+  OAuth tokens into `AuthContext`, plus patient-compartment enforcement on
+  FHIR read and search (not yet on create/update/delete).
 - Added Bulk Data `$export` (system- and type-level kick-off, status
-  polling, NDJSON download, cancellation) modeled on HL7's Bulk Data Access
-  pattern. Runs synchronously in-process — see `fhir/bulk_export.py`'s
-  documented non-durable, single-process boundary. System-level export is
-  restricted to full-access (API-key) callers.
+  polling, NDJSON download, cancellation), modeled on HL7's Bulk Data
+  Access pattern. Runs synchronously in-process — see
+  `fhir/bulk_export.py`'s documented non-durable, single-process boundary.
 
-## Unreleased (targeting 0.4.0 — Production-grade authentication)
+### Production-grade authentication (0.4.0)
 
 - Added OAuth2/OIDC bearer-token authentication (`oauth.py`,
   `api/auth.py`'s `CombinedAuthenticator`), alongside the existing API-key
   path. Disabled by default (`MEDINTELOS_OAUTH_ENABLED=false`).
-- Added SMART v1-style scope enforcement on FHIR routes
-  (`require_fhir_scope`, `scope_permits`). API-key clients remain full-access
-  (system-level), matching prior behavior; OAuth clients are scope-limited.
-- Added in-memory token-bucket rate limiting (`rate_limit.py`), enabled by
-  default, with a `Retry-After` header on `429`. `/health` is exempt.
-- Added `PostgresAuditChain`, a durable, hash-chain-compatible audit backend
-  selected via `MEDINTELOS_AUDIT_BACKEND=postgres`, serialized across
-  processes with a Postgres advisory lock. Extracted the hashing logic
-  (`compute_entry_hash`) so both audit backends produce identical hashes for
-  identical inputs.
-- Added migration `0002_audit_entries.py`.
+- Added SMART v1-style scope enforcement on FHIR routes. API-key clients
+  remain full-access (system-level); OAuth clients are scope-limited.
+- Added in-memory token-bucket rate limiting, enabled by default, with a
+  `Retry-After` header on `429`. `/health` is exempt.
+- Added `PostgresAuditChain`, a durable, hash-chain-compatible audit
+  backend, serialized across processes with a Postgres advisory lock.
 - Marked `security.py`'s `APIKeyAuthenticator` as superseded by
-  `CombinedAuthenticator` (kept for backward compatibility; logic unchanged).
+  `CombinedAuthenticator` (kept for backward compatibility).
 
-## Unreleased (targeting 0.3.0 — Persistent FHIR store)
+### Persistent FHIR store (0.3.0)
 
-- Added `PostgresFHIRStore`, a drop-in Postgres-backed implementation of the
-  FHIR store interface, selected via `MEDINTELOS_FHIR_BACKEND=postgres`. The
-  in-memory store remains the default and is unaffected.
-- Added Alembic migrations (`migrations/`), starting with the
-  `fhir_resources` table.
-- Added `docker-compose.postgres.yml`, an opt-in override adding a `db`
-  service and a one-shot `migrate` service; the default `docker-compose.yml`
-  is unchanged.
-- Added `tests/test_postgres_fhir.py`, run in CI against a real Postgres
-  service container; skipped locally unless `MEDINTELOS_TEST_DATABASE_URL`
-  is set.
-- Fixed: FHIR store calls in `api/app.py` were synchronous and blocking
-  inside `async def` route handlers. Harmless with the in-memory backend,
-  but would have blocked the event loop under real load once backed by
-  network I/O. Now wrapped in `run_in_threadpool`.
-- Fixed: replaced the deprecated `@app.on_event("shutdown")` with FastAPI's
-  `lifespan` context manager, which now also closes the Postgres connection
-  pool cleanly on shutdown.
-- Documented backup/restore and migration workflow in `docs/DEPLOYMENT.md`.
+- Added `PostgresFHIRStore`, selected via `MEDINTELOS_FHIR_BACKEND=postgres`.
+  The in-memory store remains the default.
+- Added Alembic migrations, `docker-compose.postgres.yml` opt-in override.
+- Fixed: FHIR store calls in `api/app.py` were synchronous/blocking inside
+  `async def` route handlers; wrapped in `run_in_threadpool`.
+- Fixed: replaced deprecated `@app.on_event("shutdown")` with FastAPI's
+  `lifespan` context manager.
 
-## Unreleased (targeting 0.2.0 — Governance and CI hardening)
+### Governance and CI hardening (0.2.0)
 
 - Fixed `mypy` configuration: `python_version = "3.11"` made mypy crash
   immediately against current `numpy` type stubs, so the check documented in
   `CONTRIBUTING.md` and `docs/VALIDATION.md` was not actually running.
-  `python_version` is now `3.12`.
-- Added `mypy src/medintelos` as a required step in `.github/workflows/ci.yml`
-  (previously only `ruff check .` and `pytest` were enforced).
-- Added `.github/CODEOWNERS` for clinical, security, and contract-adjacent
-  paths.
-- Added `.github/ISSUE_TEMPLATE/feature_request.yml`.
-- Added `docs/ROADMAP.md` with dependency-ordered milestones through 1.0.0.
-- Added `docs/GOVERNANCE.md` (branch protection, versioning, release process).
-- Added `docs/CONTRACT_AUDIT_CHECKLIST.md` gating any non-testnet deployment
-  of the consent/audit contracts on an external audit.
+- Added `mypy src/medintelos` as a required CI step, `.github/CODEOWNERS`,
+  feature-request issue template, `docs/ROADMAP.md`, `docs/GOVERNANCE.md`,
+  `docs/CONTRACT_AUDIT_CHECKLIST.md`.
 
 ## 0.1.0 - 2026-06-14
 
