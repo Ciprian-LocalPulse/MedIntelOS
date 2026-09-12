@@ -20,8 +20,6 @@ License: MIT
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 import logging
 import time
 from dataclasses import dataclass, field
@@ -29,7 +27,11 @@ from enum import Enum
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, Union
 from uuid import uuid4
 
+import dp_accounting
 import numpy as np
+from dp_accounting.rdp.rdp_privacy_accountant import RdpAccountant
+
+from medintelos.model_serialization import canonical_weight_hash
 
 logger = logging.getLogger(__name__)
 
@@ -69,12 +71,39 @@ class RoundStatus(str, Enum):
 
 @dataclass
 class DifferentialPrivacyConfig:
-    """Differential privacy parameters using the Gaussian mechanism."""
+    """Differential privacy parameters using the Gaussian mechanism,
+    accounted formally over the full planned training run via Google's
+    `dp_accounting` library (RDP accounting) rather than applied once and
+    forgotten.
+
+    Boundary, stated plainly: this accounts for privacy loss from the noise
+    added to each round's aggregated update. It does not account for
+    anything about how a participant trains locally (e.g. DP-SGD's
+    per-example gradient clipping across training steps) — that is a
+    separate privacy budget a participant's own training pipeline would
+    need to track if it wants that guarantee too. It also assumes an honest
+    coordinator and an honest majority of participants (see
+    docs/THREAT_MODEL.md); it does not defend against a coordinator that
+    inspects individual updates before aggregation.
+    """
     enabled: bool = True
-    epsilon: float = 1.0          # Privacy budget (lower = more private)
+    epsilon: float = 1.0          # Target cumulative privacy budget over the
+                                   # full planned run (lower = more private)
     delta: float = 1e-5           # Failure probability
     max_grad_norm: float = 1.0    # L2 gradient clipping norm
-    noise_multiplier: float = 1.1 # Gaussian noise scale (auto-computed if None)
+    noise_multiplier: Optional[float] = None
+    # Gaussian noise scale. None (the default): calibrated automatically so
+    # that `total_rounds` applications of the mechanism cost exactly
+    # `epsilon` at `delta`, via dp_accounting.calibrate_dp_mechanism — this
+    # is the fix for a real prior defect: `epsilon`/`delta` were declared
+    # config fields that the noise computation never actually used, so
+    # setting epsilon=0.1 or epsilon=100 produced identical noise. Setting
+    # noise_multiplier explicitly here bypasses calibration and uses that
+    # value directly; the coordinator still tracks and reports the actual
+    # cumulative epsilon spent (via GaussianMechanism.current_epsilon()),
+    # which may then differ from — including exceed — the declared
+    # `epsilon` if the manually chosen value doesn't match the planned
+    # round count. See CHANGELOG.md.
 
     def __post_init__(self) -> None:
         if self.epsilon <= 0:
@@ -83,11 +112,12 @@ class DifferentialPrivacyConfig:
             raise ValueError("delta must be in (0, 1)")
         if self.max_grad_norm <= 0:
             raise ValueError("max_grad_norm must be positive")
-        if self.noise_multiplier < 0:
+        if self.noise_multiplier is not None and self.noise_multiplier < 0:
             raise ValueError("noise_multiplier cannot be negative")
         logger.info(
-            "DP config: ε=%.3f, δ=%.2e, max_norm=%.2f",
-            self.epsilon, self.delta, self.max_grad_norm
+            "DP config: target ε=%.3f, δ=%.2e, max_norm=%.2f, noise_multiplier=%s",
+            self.epsilon, self.delta, self.max_grad_norm,
+            "auto-calibrated" if self.noise_multiplier is None else f"{self.noise_multiplier:.4f}",
         )
 
 
@@ -138,13 +168,43 @@ class ParticipantInfo:
 
 class GaussianMechanism:
     """
-    Gaussian mechanism for (epsilon, delta)-differential privacy.
-    Clips gradients to bounded L2 norm, then adds calibrated Gaussian noise.
+    Gaussian mechanism for (epsilon, delta)-differential privacy, formally
+    accounted via Google's `dp_accounting` library (RDP accounting) across
+    every round it's applied to — not just for a single application.
+
+    Previously, `noise_multiplier` was a fixed default (1.1) that the
+    `epsilon`/`delta` config fields never actually influenced: an operator
+    setting `epsilon=0.1` (stronger privacy) or `epsilon=100` (essentially
+    none) got identical noise either way. Verified empirically while fixing
+    this: at the old default noise_multiplier=1.1, a single round already
+    costs epsilon≈4.24 (at delta=1e-5) — far weaker than the config's own
+    epsilon=1.0 default suggested — and cumulative epsilon after 100 rounds
+    is ≈83, i.e. essentially no protection. See CHANGELOG.md.
     """
 
-    def __init__(self, config: DifferentialPrivacyConfig):
+    def __init__(self, config: DifferentialPrivacyConfig, planned_rounds: int):
+        if planned_rounds <= 0:
+            raise ValueError("planned_rounds must be positive")
         self.config = config
-        self.noise_multiplier = config.noise_multiplier
+        self.planned_rounds = planned_rounds
+        self._accountant = RdpAccountant()
+        self._rounds_composed = 0
+
+        if not config.enabled:
+            self.noise_multiplier = config.noise_multiplier or 0.0
+        elif config.noise_multiplier is not None:
+            self.noise_multiplier = config.noise_multiplier
+        else:
+            self.noise_multiplier = _calibrate_noise_multiplier(
+                target_epsilon=config.epsilon,
+                delta=config.delta,
+                planned_rounds=planned_rounds,
+            )
+        logger.info(
+            "GaussianMechanism ready: noise_multiplier=%.4f, planned_rounds=%d, "
+            "target ε=%.3f at δ=%.2e",
+            self.noise_multiplier, planned_rounds, config.epsilon, config.delta,
+        )
 
     def clip_gradients(
         self,
@@ -162,7 +222,12 @@ class GaussianMechanism:
         weights: Dict[str, np.ndarray],
         num_participants: int
     ) -> Dict[str, np.ndarray]:
-        """Add calibrated Gaussian noise to aggregated gradients."""
+        """Add calibrated Gaussian noise to aggregated gradients and record
+        this application with the privacy accountant. Each call composes
+        one more Gaussian mechanism application — call this at most once
+        per round (matching how `FederatedCoordinator._run_round` uses it),
+        since the accountant's cumulative epsilon assumes exactly that.
+        """
         if num_participants <= 0:
             raise ValueError("num_participants must be positive")
         sensitivity = 2.0 * self.config.max_grad_norm / num_participants
@@ -173,11 +238,35 @@ class GaussianMechanism:
             noise = np.random.normal(0, noise_std, tensor.shape)
             noised[layer_name] = tensor + noise
 
+        self._accountant.compose(dp_accounting.GaussianDpEvent(self.noise_multiplier))
+        self._rounds_composed += 1
+        if self._rounds_composed > self.planned_rounds:
+            logger.warning(
+                "GaussianMechanism applied %d times but was calibrated for "
+                "%d planned rounds -- the accounted epsilon below the "
+                "originally requested target is no longer guaranteed.",
+                self._rounds_composed, self.planned_rounds,
+            )
+
         logger.debug(
-            "DP noise added: σ=%.6f, sensitivity=%.6f",
-            noise_std, sensitivity
+            "DP noise added: σ=%.6f, sensitivity=%.6f, round=%d/%d, cumulative ε=%.4f",
+            noise_std, sensitivity, self._rounds_composed, self.planned_rounds,
+            self.current_epsilon(),
         )
         return noised
+
+    def current_epsilon(self, delta: Optional[float] = None) -> float:
+        """Actual cumulative privacy loss spent so far, per the accountant
+        -- not the config's declared target. Call after any number of
+        `add_noise`/`apply` calls; returns 0.0 if none have run yet."""
+        if self._rounds_composed == 0:
+            return 0.0
+        result: float = self._accountant.get_epsilon(delta or self.config.delta)
+        return result
+
+    @property
+    def rounds_composed(self) -> int:
+        return self._rounds_composed
 
     def apply(
         self,
@@ -187,6 +276,34 @@ class GaussianMechanism:
         """Full DP pipeline: clip → aggregate → noise."""
         clipped = self.clip_gradients(weights)
         return self.add_noise(clipped, num_participants)
+
+
+def _calibrate_noise_multiplier(
+    *, target_epsilon: float, delta: float, planned_rounds: int
+) -> float:
+    """Finds the noise_multiplier such that `planned_rounds` compositions of
+    the Gaussian mechanism cost exactly `target_epsilon` at `delta`, using
+    dp_accounting's RDP accountant and bracketed search. Raises ValueError
+    if no solution is found in the search bracket (e.g. an unreasonably
+    small target_epsilon requiring more noise than the bracket covers)."""
+    try:
+        noise_multiplier: float = dp_accounting.calibrate_dp_mechanism(
+            lambda: RdpAccountant(),
+            lambda nm: dp_accounting.SelfComposedDpEvent(
+                dp_accounting.GaussianDpEvent(nm), planned_rounds
+            ),
+            target_epsilon,
+            delta,
+            dp_accounting.LowerEndpointAndGuess(1e-2, 10.0),
+        )
+    except Exception as exc:  # dp_accounting raises plain Exception/AssertionError
+        raise ValueError(
+            f"Could not calibrate a noise_multiplier for target_epsilon="
+            f"{target_epsilon}, delta={delta}, planned_rounds={planned_rounds}. "
+            "Try a larger epsilon, a larger delta, or fewer planned rounds, "
+            "or set DifferentialPrivacyConfig.noise_multiplier explicitly."
+        ) from exc
+    return noise_multiplier
 
 
 # ---------------------------------------------------------------------------
@@ -359,7 +476,7 @@ class FederatedCoordinator:
         self.model_version: int = 0
 
         self._aggregator = SecureAggregator(strategy=aggregation)
-        self._dp = GaussianMechanism(self.privacy_config)
+        self._dp = GaussianMechanism(self.privacy_config, planned_rounds=self.total_rounds)
 
         logger.info(
             "FederatedCoordinator initialized: model=%s, strategy=%s, "
@@ -586,14 +703,13 @@ class FederatedCoordinator:
         return result
 
     def _hash_model(self, model: Dict[str, np.ndarray]) -> str:
-        """Compute deterministic hash of model weights for integrity verification."""
-        if not model:
-            return hashlib.sha256(b"").hexdigest()
-        serialized = json.dumps(
-            {k: v.tolist() for k, v in sorted(model.items())},
-            sort_keys=True
-        ).encode()
-        return hashlib.sha256(serialized).hexdigest()
+        """Compute deterministic hash of model weights for integrity
+        verification, via the canonical ONNX serialization
+        (model_serialization.py) rather than json.dumps of Python float
+        reprs -- see that module's docstring for why the previous approach
+        could theoretically produce different hashes for bit-identical
+        arrays across platforms, and silently ignored dtype entirely."""
+        return canonical_weight_hash(model)
 
     # ------------------------------------------------------------------
     # Status & Reporting
@@ -610,8 +726,12 @@ class FederatedCoordinator:
             "aggregation_strategy": self.aggregation.value,
             "differential_privacy": {
                 "enabled": self.privacy_config.enabled,
-                "epsilon": self.privacy_config.epsilon,
+                "target_epsilon": self.privacy_config.epsilon,
                 "delta": self.privacy_config.delta,
+                "noise_multiplier": self._dp.noise_multiplier,
+                "actual_epsilon_spent": self._dp.current_epsilon(),
+                "planned_rounds": self._dp.planned_rounds,
+                "rounds_composed": self._dp.rounds_composed,
             },
             "participants": {
                 "total": len(self.participants),

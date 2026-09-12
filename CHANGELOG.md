@@ -2,6 +2,36 @@
 
 All notable changes will be documented here.
 
+## Unreleased (targeting 0.7.0 — Federated learning hardening)
+
+- **Plan revision, documented before implementation:** "mTLS between
+  coordinator and participants" assumed a network transport that doesn't
+  exist — `FederatedCoordinator` calls participants via an in-process
+  Python callable, not over a network. Implementing mTLS with nothing to
+  secure would have been security theater; deferred to a future milestone
+  that adds an actual client-server protocol. See `docs/ROADMAP.md` 0.7.0.
+- **Fixed a real defect: differential privacy's declared `epsilon`/`delta`
+  were purely decorative.** `noise_multiplier` was a fixed constant (1.1)
+  that config's `epsilon`/`delta` never influenced. Verified empirically:
+  at that fixed value, a *single* round already cost epsilon≈4.24 at
+  delta=1e-5 — far weaker than the config's own epsilon=1.0 default
+  suggested — and cumulative epsilon after 100 rounds was ≈83 (essentially
+  no protection). Replaced with real accounting via Google's
+  `dp_accounting` library (RDP accounting): `noise_multiplier` is now
+  calibrated so that running the planned number of rounds costs exactly
+  the declared `epsilon`, and `FederatedCoordinator.get_status()` reports
+  the actual cumulative epsilon spent, not just the declared target.
+  `DifferentialPrivacyConfig.noise_multiplier` may still be set explicitly
+  to bypass calibration; the accountant then reports the real (possibly
+  worse-than-declared) epsilon honestly instead of hiding it.
+- Added standardized ONNX-based model weight serialization
+  (`model_serialization.py`), replacing the previous
+  `json.dumps(array.tolist())` approach that had no real serialize/
+  deserialize path (it was only ever used for a hash) and couldn't
+  distinguish a float32 array from a float64 array with identical values.
+  `FederatedCoordinator._hash_model` now uses the ONNX-based canonical hash.
+- Added `tests/test_dp_accounting.py` and `tests/test_model_serialization.py`.
+
 ## [0.6.0] - 2026-09-10
 
 This release bundles milestones 0.2.0 through 0.6.0 from `docs/ROADMAP.md`,

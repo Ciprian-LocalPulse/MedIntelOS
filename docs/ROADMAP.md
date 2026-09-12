@@ -92,12 +92,34 @@ Nothing here is a committed date; it is a dependency-ordered plan.
 
 ## 0.7.0 — Federated learning hardening
 
-- [ ] Formal differential-privacy accountant (e.g. via an existing DP library)
-      replacing the current noise experiment
-- [ ] mTLS between coordinator and participants
-- [ ] Standardized model serialization (ONNX) instead of ad-hoc weight dicts
+- [x] Formal differential-privacy accountant (Google's `dp_accounting`
+      library, RDP accounting) replacing the previous noise experiment.
+      Verified the defect this fixes: at the old fixed
+      `noise_multiplier=1.1` default, one round alone already cost
+      epsilon≈4.24 at delta=1e-5 regardless of what `epsilon`/`delta` an
+      operator declared — those fields were purely decorative. Now
+      `noise_multiplier` is calibrated so the declared `epsilon` is what
+      the accountant actually reports after the planned rounds run.
+- [ ] mTLS between coordinator and participants — **revised scope, found
+      while starting this work:** `FederatedCoordinator` has no network
+      transport at all. It calls participants via a pluggable in-process
+      Python callable (`update_provider`), not over a network — there is
+      no connection for mTLS to secure yet. Adding mTLS without first
+      adding an actual client-server protocol between coordinator and
+      participants would be security theater. This item is deferred until
+      a milestone that introduces that transport (a genuinely bigger scope
+      than "add mTLS" alone — likely its own milestone, not yet numbered).
+- [x] Standardized model serialization (ONNX) instead of ad-hoc weight
+      dicts. Also fixed the integrity hash (`_hash_model`), which
+      previously went through `json.dumps(array.tolist())` — no real
+      serialization path existed before this, and that approach couldn't
+      distinguish a float32 array from a float64 array with the same
+      values, and wasn't guaranteed bit-exact for float reprs across
+      platforms. The ONNX-based hash is dtype-aware and bit-exact.
 - **Boundary:** still no cryptographic secure aggregation; still assumes an
   honest majority of participants (see `docs/THREAT_MODEL.md` non-goals).
+  Still no network transport between coordinator and participants at all
+  (not just "no mTLS on it") — see the mTLS item above.
 
 ## 0.8.0 — Consent contract audit and governance
 

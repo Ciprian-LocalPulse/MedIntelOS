@@ -24,7 +24,7 @@ separate trust domains. Do not infer trust from network location alone.
 | Resource overwrite | `If-Match` version checks | Durable transactions, authorization, history, backups |
 | Sensitive logging | Audit stores action metadata only | Log review, redaction tests, SIEM access policy |
 | Malicious model update | Shape checks and basic norm outlier detection | Signatures, attestation, robust aggregation, quarantine |
-| Privacy leakage from models | Optional clipping/noise experiment | Formal accountant, sampling proof, privacy review |
+| Privacy leakage from models | Formal (epsilon, delta) accounting via RDP composition across the full planned training run (0.7.0), not a per-round noise experiment | Does not account for a participant's local training-time privacy (e.g. DP-SGD across local training steps) — that is a separate budget a participant's own pipeline would need to track. No membership-inference or model-inversion testing performed. No secure aggregation (0.7.0 boundary below) |
 | Smart-contract privilege abuse | Owner checks and explicit proxy authorization | Multisig, timelocks, monitoring, independent audit |
 | On-chain privacy leakage | Documentation prohibits PHI | Data classification, linkage analysis, retention design |
 | Clinical automation bias | Explicit warnings and deterministic explanations | Human-factors testing, governance, monitoring, override review |
